@@ -4,7 +4,7 @@ do
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", {
             Title = "BDZ HUB",
-            Text  = "Key system disabled — default key: " .. KEY_DEFAULT,
+            Text  = "Key system disabled - default key: " .. KEY_DEFAULT,
             Duration = 4,
         })
     end)
@@ -55,6 +55,7 @@ local function DisplayName(n) return MOB_DISPLAY[n] or n end
 
 local LOGO_URL="https://263.org.vn/logo"
 local LogoAsset=nil
+local LOGO_FILENAME="bdz_hub_logo.jpg"
 local function DetectLogoExt(data)
     if type(data)~="string" then return ".png" end
     if data:sub(1,8)=="\137PNG\r\n\026\n" then return ".png" end
@@ -70,6 +71,7 @@ local function LoadRemoteLogo()
     local ok,data=pcall(function() return game:HttpGet(LOGO_URL) end)
     if not ok or type(data)~="string" or #data<32 then return nil end
     local path="bdz_hub_logo"..DetectLogoExt(data)
+    LOGO_FILENAME=path
     pcall(function() writefile(path,data) end)
     local okAsset,asset=pcall(function() return assetLoader(path) end)
     if okAsset and asset then return asset end
@@ -118,12 +120,12 @@ do
             task.wait(1.2)
         end
     end)
-    local card=mk("Frame",{Size=UDim2.new(0,82,0,82),Position=UDim2.new(0.5,-41,0.5,-41),BackgroundColor3=Color3.fromRGB(10,14,22),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=10,Parent=orbit})
-    mk("UICorner",{CornerRadius=UDim.new(0,22)},card)
+    local card=mk("Frame",{Size=UDim2.new(0,76,0,76),Position=UDim2.new(0.5,-38,0.5,-38),BackgroundColor3=Color3.fromRGB(10,14,22),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=10,Parent=orbit})
+    mk("UICorner",{CornerRadius=UDim.new(0,21)},card)
     local cs=mk("UIStroke",{Color=Color3.fromRGB(88,196,255),Thickness=1.5,Transparency=1},card)
-    local logoImg=mk("ImageLabel",{Size=UDim2.new(1,-12,1,-12),Position=UDim2.new(0,6,0,6),BackgroundTransparency=1,Image=LogoAsset or "",ImageTransparency=1,ScaleType=Enum.ScaleType.Fit,ZIndex=11,Parent=card})
+    local logoImg=mk("ImageLabel",{Size=UDim2.new(1,-16,1,-16),Position=UDim2.new(0,8,0,8),BackgroundTransparency=1,Image=LogoAsset or "",ImageTransparency=1,ScaleType=Enum.ScaleType.Fit,ResampleMode=Enum.ResamplerMode.Default,ZIndex=11,Parent=card})
     local glyph=mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="B",Font=Enum.Font.GothamBlack,TextSize=40,TextColor3=Color3.fromRGB(160,220,255),TextTransparency=1,ZIndex=10,Parent=card})
-    local title=mk("TextLabel",{Size=UDim2.new(1,0,0,40),Position=UDim2.new(0,0,0,250),BackgroundTransparency=1,Text="B D Z  H U B",Font=Enum.Font.GothamBlack,TextSize=28,TextColor3=Color3.fromRGB(242,245,252),TextTransparency=1,ZIndex=7,Parent=stage})
+    local title=mk("TextLabel",{Size=UDim2.new(1,0,0,40),Position=UDim2.new(0,0,0,250),BackgroundTransparency=1,Text="BDZ HUB",Font=Enum.Font.GothamBlack,TextSize=28,TextColor3=Color3.fromRGB(242,245,252),TextTransparency=1,ZIndex=7,Parent=stage})
     local sub=mk("TextLabel",{Size=UDim2.new(1,0,0,18),Position=UDim2.new(0,0,0,292),BackgroundTransparency=1,Text="INITIALIZING",Font=Enum.Font.GothamBold,TextSize=11,TextColor3=Color3.fromRGB(140,158,190),TextTransparency=1,ZIndex=7,Parent=stage})
     local trk=mk("Frame",{Size=UDim2.new(0,360,0,3),Position=UDim2.new(0.5,-180,0,330),BackgroundColor3=Color3.fromRGB(24,30,44),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=7,Parent=stage})
     mk("UICorner",{CornerRadius=UDim.new(1,0)},trk)
@@ -171,7 +173,7 @@ do
     local phases={{t="loading",h="interface",d=0.25,p=15},{t="remotes",h="CommF_",d=0.25,p=35},{t="sea",h="sea "..SeaIndex,d=0.25,p=55},{t="panels",h="7 tabs",d=0.30,p=75},{t="ready",h="welcome",d=0.30,p=100}}
     task.spawn(function()
         for _,ph in ipairs(phases) do
-            pctL.Text=ph.t.."  ·  "..ph.h
+            pctL.Text=ph.t.."  |  "..ph.h
             pct.Text=ph.p.."%"
             S.Tween:Create(fill,TweenInfo.new(ph.d,Enum.EasingStyle.Quint),{Size=UDim2.new(ph.p/100,0,1,0)}):Play()
             task.wait(ph.d)
@@ -473,7 +475,7 @@ end
 local function RunChestFarm()
     local c=FindNearestChest()
     if c then State.SubStatus="Chest Farm"; TeleportTo(CFrame.new(c.Position+Vector3.new(0,3,0))); task.wait(0.15)
-    else State.SubStatus="Chest — none"; task.wait(0.5) end
+    else State.SubStatus="Chest - none"; task.wait(0.5) end
 end
 local function FindBoss(name)
     local en=S.WS:FindFirstChild("Enemies")
@@ -483,11 +485,11 @@ local function FindBoss(name)
     return nil
 end
 local function FarmMobTarget(mob,label)
-    if not mob then State.SubStatus=label.." — none" return false end
+    if not mob then State.SubStatus=label.." - none" return false end
     local hrp=GetRoot(); if not hrp then return false end
     local mrp=mob:FindFirstChild("HumanoidRootPart"); if not mrp then return false end
     EquipWeapon()
-    State.SubStatus=label.." — "..DisplayName(mob.Name)
+    State.SubStatus=label.." - "..DisplayName(mob.Name)
     local mobPos=mrp.Position
     local tcf=CFrame.new(mobPos+Vector3.new(0,State.HoverHeight,5))
     local dist=(hrp.Position-tcf.Position).Magnitude
@@ -502,16 +504,16 @@ local function FarmMobTarget(mob,label)
 end
 local function RunBossFarm()
     local b=FindBoss(State.SelectedBoss)
-    if b then FarmMobTarget(b,"Boss") else State.SubStatus="Boss — searching" task.wait(0.5) end
+    if b then FarmMobTarget(b,"Boss") else State.SubStatus="Boss - searching" task.wait(0.5) end
 end
 local function RunNearestMobFarm()
     local m=FindNearestMob(3000)
-    if not m then State.SubStatus="Nearest — none" task.wait(0.5) return end
+    if not m then State.SubStatus="Nearest - none" task.wait(0.5) return end
     FarmMobTarget(m,"Nearest")
 end
 local function RunSpecificMobFarm()
     local m=FindMob(State.SelectedMob)
-    if not m then State.SubStatus="Specific — no "..DisplayName(State.SelectedMob) task.wait(0.5) return end
+    if not m then State.SubStatus="Specific - no "..DisplayName(State.SelectedMob) task.wait(0.5) return end
     FarmMobTarget(m,"Specific")
 end
 
@@ -552,7 +554,7 @@ local function RunBuyChip()
     if HasChip() then return end
     if tick()-State.LastChipBuy<5 then return end
     State.LastChipBuy=tick()
-    State.SubStatus="Raid — Beli chip"
+    State.SubStatus="Raid - Beli chip"
     pcall(function() Invoke("RaidsNpc","Select",State.RaidChip) end)
     task.wait(2)
     if HasChip() then return end
@@ -561,7 +563,7 @@ local function RunBuyChip()
     if HasChip() then return end
     for _,fn in ipairs(DATA.CHEAP) do
         local s=fn:match("^([^%-]+)") or fn
-        State.SubStatus="Raid — "..s
+        State.SubStatus="Raid - "..s
         pcall(function() Invoke("LoadFruit",fn) end)
         local ok=false
         for _=1,10 do task.wait(0.2) if FruitInBackpack(fn) then ok=true break end end
@@ -571,19 +573,19 @@ local function RunBuyChip()
         end
         if not ok then continue end
         pcall(function() Invoke("RaidsNpc","Select",State.RaidChip) end)
-        for _=1,20 do task.wait(0.25) if HasChip() then State.SubStatus="Raid — chip ready" State.RaidClickAttempts=0 return end end
+        for _=1,20 do task.wait(0.25) if HasChip() then State.SubStatus="Raid - chip ready" State.RaidClickAttempts=0 return end end
     end
-    State.SubStatus="Raid — chip fail"
+    State.SubStatus="Raid - chip fail"
     task.wait(2)
 end
 local function RunStartRaid()
     if InRaid() then State.RaidClickAttempts=0 return end
-    if not HasChip() then State.SubStatus="Raid — waiting chip" return end
+    if not HasChip() then State.SubStatus="Raid - waiting chip" return end
     if tick()-State.LastSummonTry<3 then return end
     State.LastSummonTry=tick()
     State.RaidClickAttempts=State.RaidClickAttempts+1
     UnequipChip(); task.wait(0.2)
-    State.SubStatus="Raid — finding summon"
+    State.SubStatus="Raid - finding summon"
     local summon=nil
     local map=S.WS:FindFirstChild("Map")
     if map then
@@ -599,7 +601,7 @@ local function RunStartRaid()
         if not buttonPart then for _,d in ipairs(summon:GetDescendants()) do if d:IsA("BasePart") and d:FindFirstChildOfClass("ClickDetector") then buttonPart=d break end end end
         if not buttonPart then for _,d in ipairs(summon:GetDescendants()) do if d:IsA("BasePart") and d.Name=="Main" then buttonPart=d break end end end
         if buttonPart then
-            State.SubStatus="Raid — walking in"
+            State.SubStatus="Raid - walking in"
             local hrp=GetRoot()
             if hrp then
                 local approach=buttonPart.Position+Vector3.new(0,3,30)
@@ -624,16 +626,16 @@ local function RunStartRaid()
         if R.Btn then pcall(function() R.Btn:FireServer("Start",State.RaidChip) end) end
         if R.CommF then pcall(function() R.CommF:InvokeServer("Raid",State.RaidChip) end); pcall(function() R.CommF:InvokeServer("StartRaid",State.RaidChip) end) end
     else
-        State.SubStatus="Raid — no summon"
+        State.SubStatus="Raid - no summon"
         if R.CommF then pcall(function() R.CommF:InvokeServer("StartRaid",State.RaidChip) end) end
     end
-    State.SubStatus="Raid — verifying"
-    for _=1,15 do task.wait(0.4) if InRaid() then State.SubStatus="Raid — started" State.RaidClickAttempts=0 return end end
-    State.SubStatus="Raid — retry "..State.RaidClickAttempts
+    State.SubStatus="Raid - verifying"
+    for _=1,15 do task.wait(0.4) if InRaid() then State.SubStatus="Raid - started" State.RaidClickAttempts=0 return end end
+    State.SubStatus="Raid - retry "..State.RaidClickAttempts
     if State.RaidClickAttempts>=4 then State.RaidClickAttempts=0 State.LastChipBuy=0 end
 end
 local function RunClearRaid()
-    if not InRaid() then State.SubStatus="Raid — waiting" return end
+    if not InRaid() then State.SubStatus="Raid - waiting" return end
     if State.RaidChip=="Magma" or State.RaidChip=="Flame" then
         local map=S.WS:FindFirstChild("Map")
         if map then for _,d in ipairs(map:GetDescendants()) do if d.Name=="Lava" and d.Parent then pcall(function() d:Destroy() end) end end end
@@ -644,17 +646,17 @@ local function RunClearRaid()
     local locs=origin and origin:FindFirstChild("Locations")
     if locs then
         local hrp=GetRoot()
-        if hrp then for _,n in ipairs(names) do local t=locs:FindFirstChild(n) if t and (t.Position-hrp.Position).Magnitude<=3000 then found=t State.SubStatus="Raid — "..n break end end end
+        if hrp then for _,n in ipairs(names) do local t=locs:FindFirstChild(n) if t and (t.Position-hrp.Position).Magnitude<=3000 then found=t State.SubStatus="Raid - "..n break end end end
     end
     if not found then
         local rm=S.WS:FindFirstChild("RaidMap")
-        if rm then for _,n in ipairs(names) do local t=rm:FindFirstChild(n) if t then found=t State.SubStatus="Raid — "..n break end end end
+        if rm then for _,n in ipairs(names) do local t=rm:FindFirstChild(n) if t then found=t State.SubStatus="Raid - "..n break end end end
     end
     if found then
         local hrp=GetRoot()
         local p=found:IsA("BasePart") and found.Position or found:GetPivot().Position
         if hrp and (hrp.Position-p).Magnitude>100 then TeleportTo(CFrame.new(p+Vector3.new(0,120,0))) task.wait(0.3) end
-    else State.SubStatus="Raid — clearing" end
+    else State.SubStatus="Raid - clearing" end
     local en=S.WS:FindFirstChild("Enemies")
     if en then
         local hrp=GetRoot()
@@ -776,7 +778,7 @@ local function RunLevelFarm()
         if changed or done then
             local hrp=GetRoot()
             if hrp and (hrp.Position-gcf.Position).Magnitude>12 then
-                State.SubStatus="→ quest giver"
+                State.SubStatus="> quest giver"
                 MoveTo(gcf+Vector3.new(0,5,3))
                 task.wait(0.05)
                 return
@@ -795,7 +797,7 @@ local function RunLevelFarm()
         State.SubStatus=string.format("%s [%d]",DisplayName(mn),State.MyLevel)
         FarmMobTarget(live,"Level")
     else
-        State.SubStatus="Traveling → "..DisplayName(mn)
+        State.SubStatus="Traveling > "..DisplayName(mn)
         MoveTo(gcf)
     end
     TrackKills(mn)
@@ -811,8 +813,8 @@ local MainLoop=function()
             if State.AutoClearRaid and InRaid() then RunClearRaid()
             elseif HasChip() and not InRaid() then RunStartRaid()
             elseif State.AutoBuyChip and not HasChip() then RunBuyChip()
-            elseif State.AutoClearRaid then State.SubStatus="Raid — waiting"
-            else State.SubStatus="Raid — waiting chip" end
+            elseif State.AutoClearRaid then State.SubStatus="Raid - waiting"
+            else State.SubStatus="Raid - waiting chip" end
         elseif State.AutoBossFarm then RunBossFarm()
         elseif State.AutoNearestMob then RunNearestMobFarm()
         elseif State.AutoSpecificMob then RunSpecificMobFarm()
@@ -912,24 +914,24 @@ do
     mk("UICorner",{CornerRadius=UDim.new(0,18)},header)
     mk("Frame",{Size=UDim2.new(1,0,0.55,0),Position=UDim2.new(0,0,0.45,0),BackgroundColor3=T.bg1,BackgroundTransparency=0.08,BorderSizePixel=0,ZIndex=2},header)
     mk("UIGradient",{Color=ColorSequence.new({ColorSequenceKeypoint.new(0,T.bg1),ColorSequenceKeypoint.new(0.55,T.bg2),ColorSequenceKeypoint.new(1,T.bg1)}),Rotation=0},header)
-    local logoBox=mk("Frame",{Size=UDim2.new(0,46,0,46),Position=UDim2.new(0,18,0.5,-23),BackgroundColor3=T.bg3,BorderSizePixel=0,ZIndex=4},header)
-    mk("UICorner",{CornerRadius=UDim.new(0,14)},logoBox)
+    local logoBox=mk("Frame",{Size=UDim2.new(0,48,0,48),Position=UDim2.new(0,18,0.5,-24),BackgroundColor3=T.bg3,BorderSizePixel=0,ZIndex=4},header)
+    mk("UICorner",{CornerRadius=UDim.new(0,15)},logoBox)
     mk("UIStroke",{Color=T.accentDim,Thickness=1,Transparency=0.15},logoBox)
-    local logoGlow=mk("Frame",{Size=UDim2.new(0,34,0,34),Position=UDim2.new(0.5,-17,0.5,-17),BackgroundColor3=T.accent,BackgroundTransparency=0.88,BorderSizePixel=0,ZIndex=5,Parent=logoBox},nil)
+    local logoGlow=mk("Frame",{Size=UDim2.new(0,30,0,30),Position=UDim2.new(0.5,-15,0.5,-15),BackgroundColor3=T.accent,BackgroundTransparency=0.96,BorderSizePixel=0,ZIndex=5,Parent=logoBox},nil)
     mk("UICorner",{CornerRadius=UDim.new(1,0)},logoGlow)
-    local headerLogo=mk("ImageLabel",{Size=UDim2.new(1,-8,1,-8),Position=UDim2.new(0,4,0,4),BackgroundTransparency=1,Image=LogoAsset or "",ScaleType=Enum.ScaleType.Fit,ZIndex=7,Parent=logoBox})
+    local headerLogo=mk("ImageLabel",{Size=UDim2.new(1,-10,1,-10),Position=UDim2.new(0,5,0,5),BackgroundTransparency=1,Image=LogoAsset or "",ScaleType=Enum.ScaleType.Fit,ResampleMode=Enum.ResamplerMode.Default,ZIndex=7,Parent=logoBox})
     local headerGlyph=mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="B",Font=F.black,TextSize=22,TextColor3=T.accentHot,ZIndex=6},logoBox)
     mk("TextLabel",{Size=UDim2.new(0,260,0,20),Position=UDim2.new(0,80,0,13),BackgroundTransparency=1,Text="BDZ HUB",Font=F.black,TextSize=17,TextColor3=T.text,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
-    local seaLbl=mk("TextLabel",{Size=UDim2.new(0,260,0,15),Position=UDim2.new(0,80,0,38),BackgroundTransparency=1,Text="v1.0  ·  sea "..SeaIndex,Font=F.reg,TextSize=11,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
+    local seaLbl=mk("TextLabel",{Size=UDim2.new(0,260,0,15),Position=UDim2.new(0,80,0,38),BackgroundTransparency=1,Text="v1.0  |  sea "..SeaIndex,Font=F.reg,TextSize=11,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
     local pill=mk("Frame",{Size=UDim2.new(0,108,0,28),Position=UDim2.new(1,-194,0.5,-14),BackgroundColor3=T.bg2,BorderSizePixel=0,ZIndex=4},header)
     mk("UICorner",{CornerRadius=UDim.new(1,0)},pill)
     local pillStroke=mk("UIStroke",{Color=T.border2,Thickness=1,Transparency=0.4},pill)
     local pillDot=mk("Frame",{Size=UDim2.new(0,8,0,8),Position=UDim2.new(0,14,0.5,-4),BackgroundColor3=T.textFaint,BorderSizePixel=0,ZIndex=5},pill)
     mk("UICorner",{CornerRadius=UDim.new(1,0)},pillDot)
     local pillText=mk("TextLabel",{Size=UDim2.new(1,-30,1,0),Position=UDim2.new(0,28,0,0),BackgroundTransparency=1,Text="IDLE",Font=F.bold,TextSize=11,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=5},pill)
-    local minBtn=mk("TextButton",{Size=UDim2.new(0,32,0,32),Position=UDim2.new(1,-80,0.5,-16),BackgroundColor3=T.bg3,BorderSizePixel=0,Text="—",Font=F.bold,TextSize=16,TextColor3=T.text,AutoButtonColor=false,ZIndex=6},header)
+    local minBtn=mk("TextButton",{Size=UDim2.new(0,32,0,32),Position=UDim2.new(1,-80,0.5,-16),BackgroundColor3=T.bg3,BorderSizePixel=0,Text="-",Font=F.bold,TextSize=16,TextColor3=T.text,AutoButtonColor=false,ZIndex=6},header)
     mk("UICorner",{CornerRadius=UDim.new(0,10)},minBtn)
-    local closeBtn=mk("TextButton",{Size=UDim2.new(0,32,0,32),Position=UDim2.new(1,-42,0.5,-16),BackgroundColor3=T.bg3,BorderSizePixel=0,Text="✕",Font=F.bold,TextSize=15,TextColor3=T.text,AutoButtonColor=false,ZIndex=6},header)
+    local closeBtn=mk("TextButton",{Size=UDim2.new(0,32,0,32),Position=UDim2.new(1,-42,0.5,-16),BackgroundColor3=T.bg3,BorderSizePixel=0,Text="X",Font=F.bold,TextSize=15,TextColor3=T.text,AutoButtonColor=false,ZIndex=6},header)
     mk("UICorner",{CornerRadius=UDim.new(0,10)},closeBtn)
     local body=mk("Frame",{Size=UDim2.new(1,0,1,-70),Position=UDim2.new(0,0,0,70),BackgroundTransparency=1,ZIndex=2},main)
     local sidebar=mk("Frame",{Size=UDim2.new(0,156,1,-24),Position=UDim2.new(0,12,0,12),BackgroundColor3=T.bg1,BackgroundTransparency=0.3,BorderSizePixel=0},body)
@@ -942,7 +944,7 @@ do
     mk("UICorner",{CornerRadius=UDim.new(0,14)},pageHolder)
     mk("UIStroke",{Color=T.border,Thickness=1,Transparency=0.5},pageHolder)
     local pages,tabBtns={},{}
-    local tabIcons={Home="⌂",Farm="◆",Attack="⚔",Raid="◇",Misc="☷",FPS="ϟ",About="i"}
+    local tabIcons={Home="H",Farm="F",Attack="A",Raid="R",Misc="M",FPS="P",About="I"}
     local function makeTab(lbl,o,n)
         local b=mk("TextButton",{Size=UDim2.new(1,0,0,37),BackgroundColor3=T.bg2,BackgroundTransparency=0.62,BorderSizePixel=0,Text="",AutoButtonColor=false,LayoutOrder=o},sidebar)
         mk("UICorner",{CornerRadius=UDim.new(0,10)},b)
@@ -950,8 +952,10 @@ do
         mk("UICorner",{CornerRadius=UDim.new(1,0)},ind)
         local dot=mk("Frame",{Size=UDim2.new(0,7,0,7),Position=UDim2.new(0,16,0.5,-3.5),BackgroundColor3=T.textFaint,BorderSizePixel=0},b)
         mk("UICorner",{CornerRadius=UDim.new(1,0)},dot)
-        local icon=mk("TextLabel",{Size=UDim2.new(0,18,1,0),Position=UDim2.new(0,29,0,0),BackgroundTransparency=1,Text=tabIcons[n] or "•",Font=F.bold,TextSize=12,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Center},b)
-        local t=mk("TextLabel",{Size=UDim2.new(1,-55,1,0),Position=UDim2.new(0,51,0,0),BackgroundTransparency=1,Text=lbl,Font=F.med,TextSize=12,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Left},b)
+        local icon=mk("TextLabel",{Size=UDim2.new(0,24,0,24),Position=UDim2.new(0,18,0.5,-12),BackgroundColor3=T.bg4,BackgroundTransparency=0.15,Text=tabIcons[n] or "B",Font=F.black,TextSize=11,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Center,TextYAlignment=Enum.TextYAlignment.Center},b)
+        mk("UICorner",{CornerRadius=UDim.new(0,8)},icon)
+        mk("UIStroke",{Color=T.border2,Thickness=1,Transparency=0.55},icon)
+        local t=mk("TextLabel",{Size=UDim2.new(1,-54,1,0),Position=UDim2.new(0,53,0,0),BackgroundTransparency=1,Text=lbl,Font=F.med,TextSize=12,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},b)
         tabBtns[n]={btn=b,ind=ind,dot=dot,lbl=t,icon=icon}
         b.MouseEnter:Connect(function()
             if not b:GetAttribute("BDZActive") then tw(b,0.15,{BackgroundColor3=T.bg3,BackgroundTransparency=0.25}) end
@@ -976,7 +980,7 @@ do
     local scAbout=newPage("About")
     makeTab("Home",1,"Home") makeTab("Farm",2,"Farm") makeTab("Attack",3,"Attack")
     makeTab("Raid",4,"Raid") makeTab("Misc",5,"Misc") makeTab("FPS",6,"FPS") makeTab("About",7,"About")
-    local sideFooter=mk("TextLabel",{Size=UDim2.new(1,-16,0,26),Position=UDim2.new(0,8,1,-38),BackgroundTransparency=1,Text="BDZ HUB  •  BLOX FRUITS",Font=F.mono,TextSize=8,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Center,ZIndex=3},sidebar)
+    local sideFooter=mk("TextLabel",{Size=UDim2.new(1,-16,0,26),Position=UDim2.new(0,8,1,-38),BackgroundTransparency=1,Text="BDZ HUB  |  BLOX FRUITS",Font=F.mono,TextSize=8,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Center,ZIndex=3},sidebar)
     local function sec(par,txt,o)
         local w=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundTransparency=1,LayoutOrder=o},par)
         mk("TextLabel",{Size=UDim2.new(1,0,0,16),BackgroundTransparency=1,Text=txt,Font=F.bold,TextSize=9,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left},w)
@@ -1087,7 +1091,7 @@ do
         local row=mk("Frame",{Size=UDim2.new(1,-36,0,32),Position=UDim2.new(0,18,0,36),BackgroundColor3=T.bg3,BorderSizePixel=0,ZIndex=11},w)
         mk("UICorner",{CornerRadius=UDim.new(0,8)},row)
         mk("UIStroke",{Color=T.border2,Thickness=1,Transparency=0.4},row)
-        mk("TextLabel",{Size=UDim2.new(0,20,1,0),Position=UDim2.new(1,-24,0,0),BackgroundTransparency=1,Text="▾",Font=F.bold,TextSize=12,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Center,ZIndex=12},row)
+        mk("TextLabel",{Size=UDim2.new(0,20,1,0),Position=UDim2.new(1,-24,0,0),BackgroundTransparency=1,Text="v",Font=F.bold,TextSize=12,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Center,ZIndex=12},row)
         local cur={display=dN.display,value=dN.value}
         local lo=false
         local btn=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",ZIndex=12},row)
@@ -1218,10 +1222,10 @@ do
     local adS=sld(scAttack,"Attack Delay","Milliseconds between swings. 0 = every frame.",0,100,State.AttackDelay*1000," ms",function(v) State.AttackDelay=v/1000 end,2)
     local mhS=sld(scAttack,"Multi Hit","Hit events per swing.",1,5,State.AttackBurst," hits",function(v) State.AttackBurst=math.floor(v) end,3)
     sec(scAttack,"PRESETS",4)
-    act(scAttack,"Safe — 33/sec",function() adS.set(30) mhS.set(1) end,5,"default")
-    act(scAttack,"Normal — 60/sec",function() adS.set(16) mhS.set(1) end,6,"primary")
-    act(scAttack,"Fast — 120/sec",function() adS.set(16) mhS.set(2) end,7,"default")
-    act(scAttack,"Max — 300/sec",function() adS.set(0) mhS.set(5) end,8,"danger")
+    act(scAttack,"Safe - 33/sec",function() adS.set(30) mhS.set(1) end,5,"default")
+    act(scAttack,"Normal - 60/sec",function() adS.set(16) mhS.set(1) end,6,"primary")
+    act(scAttack,"Fast - 120/sec",function() adS.set(16) mhS.set(2) end,7,"default")
+    act(scAttack,"Max - 300/sec",function() adS.set(0) mhS.set(5) end,8,"danger")
 
     sec(scRaid,"MAIN MODE",1)
     local rT=tgl(scRaid,"Auto Raid","Buys chip, walks to summon, clicks button, clears islands.",State.AutoRaidMode,function(v) State.AutoRaidMode=v UI.Upd() end,2)
@@ -1315,6 +1319,7 @@ do
                 headerLogo.Image=LogoAsset
                 headerLogo.ImageTransparency=0
                 headerGlyph.Visible=false
+                logoGlow.BackgroundTransparency=0.97
                 break
             end
             task.wait(0.15)
@@ -1377,11 +1382,63 @@ do
 
     local min=false
     local origS=UDim2.new(0,W,0,H)
+    local origHeaderS=UDim2.new(1,0,0,70)
+    local origLogoS=UDim2.new(0,48,0,48)
+    local compactLogoS=UDim2.new(0,54,0,54)
+    local compactHit=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Visible=false,ZIndex=20},main)
+    local function setMinimized(v)
+        min=v
+        if min then
+            body.Visible=false
+            topLine.Visible=false
+            glowTR.Visible=false
+            glowBL.Visible=false
+            pill.Visible=false
+            minBtn.Visible=false
+            closeBtn.Visible=false
+            seaLbl.Visible=false
+            for _,ch in ipairs(header:GetChildren()) do
+                if ch:IsA("Frame") and ch~=logoBox then ch.Visible=false end
+            end
+            main.Size=UDim2.new(0,64,0,64)
+            main.BackgroundTransparency=0.02
+            header.Size=UDim2.new(1,0,1,0)
+            header.BackgroundTransparency=1
+            logoBox.Size=compactLogoS
+            logoBox.Position=UDim2.new(0.5,-27,0.5,-27)
+            headerLogo.Size=UDim2.new(1,-10,1,-10)
+            headerLogo.Position=UDim2.new(0,5,0,5)
+            headerGlyph.TextSize=24
+            compactHit.Visible=true
+        else
+            compactHit.Visible=false
+            main.BackgroundTransparency=0
+            main.Size=origS
+            header.Size=origHeaderS
+            header.BackgroundTransparency=0.08
+            body.Visible=true
+            topLine.Visible=true
+            glowTR.Visible=true
+            glowBL.Visible=true
+            pill.Visible=true
+            minBtn.Visible=true
+            closeBtn.Visible=true
+            seaLbl.Visible=true
+            for _,ch in ipairs(header:GetChildren()) do
+                if ch:IsA("Frame") and ch~=logoBox then ch.Visible=true end
+            end
+            logoBox.Size=origLogoS
+            logoBox.Position=UDim2.new(0,18,0.5,-24)
+            headerLogo.Size=UDim2.new(1,-10,1,-10)
+            headerLogo.Position=UDim2.new(0,5,0,5)
+            headerGlyph.TextSize=22
+        end
+    end
     minBtn.MouseButton1Click:Connect(function()
-        min=not min
-        tw(main,0.3,{Size=min and UDim2.new(0,W,0,64) or origS},Enum.EasingStyle.Quint)
-        body.Visible=not min
-        minBtn.Text=min and "+" or "—"
+        setMinimized(true)
+    end)
+    compactHit.MouseButton1Click:Connect(function()
+        setMinimized(false)
     end)
     closeBtn.MouseButton1Click:Connect(function()
         State.Destroyed=true State.PanicMode=true StopMoving()
@@ -1390,7 +1447,7 @@ do
     end)
     minBtn.MouseEnter:Connect(function() tw(minBtn,0.15,{BackgroundColor3=T.bg4}) end)
     minBtn.MouseLeave:Connect(function() tw(minBtn,0.15,{BackgroundColor3=T.bg3}) end)
-    closeBtn.MouseEnter:Connect(function() tw(closeBtn,0.15,{BackgroundColor3=T.dangerDim}) end)
+    closeBtn.MouseEnter:Connect(function() tw(closeBtn,0.15,{BackgroundColor3=T.dangerDim,TextColor3=T.text}) end)
     closeBtn.MouseLeave:Connect(function() tw(closeBtn,0.15,{BackgroundColor3=T.bg3}) end)
 
     main.Size=UDim2.new(0,W,0,0) main.BackgroundTransparency=1 main.Visible=false
@@ -1432,10 +1489,10 @@ task.spawn(function()
             if ns~=SeaIndex then
                 SeaIndex=ns
                 for _,fn in ipairs(SeaChanged) do pcall(fn,ns) end
-                print("[BDZ HUB] sea changed → "..ns)
+                print("[BDZ HUB] sea changed > "..ns)
             end
         end
     end
 end)
 
-print("[BDZ HUB] loaded — v1.0")
+print("[BDZ HUB] loaded - v1.0")
