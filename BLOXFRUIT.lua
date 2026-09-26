@@ -1,199 +1,369 @@
---// ================= BDZ HUB AUTH =================
-local AUTH_URL="https://nklukqriopezsoalnghm.supabase.co/functions/v1/check-key"
-local AUTH_APP_VERSION="V1"
-local AUTH_FAIL_MESSAGE="Key không hợp lệ."
-local AUTH_ENV=(getgenv and getgenv()) or _G
-local SUPABASE_APIKEY=tostring(AUTH_ENV.BDZ_SUPABASE_APIKEY or "")
-local passed=false
-local AuthDeviceId=""
-local AuthIP=""
+--// ============================================================
+--//  BDZ HUB · KEY SYSTEM  (paste ở ĐẦU script, trước mọi code khác)
+--//  Luồng: GET KEY -> vượt link -> NHẬN KEY -> dán key -> VERIFY
+--//  API: Supabase Edge Function check-key (device bind + time check)
+--// ============================================================
 
-local function Trim(s)
-    s=tostring(s or "")
-    return (s:gsub("^%s+",""):gsub("%s+$",""))
+local SERVER_URL   = "https://aryaxynk.github.io/" -- web get key
+local CHECK_URL    = "https://nklukqriopezsoalnghm.supabase.co/functions/v1/check-key"
+local SUPABASE_KEY = "sb_publishable_RUE5iV8GqoVCFxjVt5ZBpg_FlTC1v-0"
+local APP_VERSION  = "V1"
+local SAVE_FILE    = "BDZ_key.txt" -- lưu key để tự đăng nhập khi key còn hạn
+
+local Players = game:GetService("Players")
+local Http    = game:GetService("HttpService")
+local LP      = Players.LocalPlayer
+
+-- ---------------- helpers ----------------
+local function urlencode(s)
+    return (tostring(s):gsub("([^%w%-_%.~])", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end))
 end
 
-local function GetDeviceId()
-    local candidates={
-        function() if gethwid then return gethwid() end end,
-        function() if syn and syn.gethwid then return syn.gethwid() end end,
-        function() return game:GetService("RbxAnalyticsService"):GetClientId() end,
-    }
-    for _,fn in ipairs(candidates) do
-        local ok,v=pcall(fn)
-        v=Trim(v)
-        if ok and v~="" then return v end
-    end
-    local file="bdz_hub_device_id.txt"
-    if isfile and readfile then
-        local ok,v=pcall(function() return readfile(file) end)
-        v=Trim(v)
-        if ok and v~="" then return v end
-    end
-    local id=string.format("BDZ-%d-%d-%d",os.time(),math.random(100000,999999),math.random(100000,999999))
-    if writefile then pcall(function() writefile(file,id) end) end
-    return id
+local function notify(title, text, dur)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = title, Text = text, Duration = dur or 5,
+        })
+    end)
 end
 
-local function GetPublicIP()
-    for _,url in ipairs({"https://api.ipify.org","https://checkip.amazonaws.com"}) do
-        local ok,v=pcall(function() return game:HttpGet(url) end)
-        v=Trim(v)
-        if ok and v~="" and #v<=64 then return v end
+local function httpGet(url)
+    local ok, body = pcall(function() return game:HttpGet(url) end)
+    if ok and body and body ~= "" then return body end
+    local req = request or http_request or (syn and syn.request)
+    if req then
+        local ok2, res = pcall(req, { Url = url, Method = "GET" })
+        if ok2 and res then
+            if type(res) == "table" and res.Body then return res.Body end
+            if type(res) == "string" and res ~= "" then return res end
+        end
     end
-    return ""
-end
-
-local function ResolveRequest()
-    if request then return request end
-    if http_request then return http_request end
-    if syn and syn.request then return syn.request end
-    if http and http.request then return http.request end
     return nil
 end
 
-local function PostJSON(url,headers,payload)
-    local body=S.HTTP:JSONEncode(payload)
-    local req=ResolveRequest()
+local function httpPostJson(url, headers, payloadTable)
+    local body = Http:JSONEncode(payloadTable)
+    local req = request or http_request or (syn and syn.request)
     if req then
-        local ok,res=pcall(function()
-            return req({Url=url,Method="POST",Headers=headers,Body=body})
-        end)
-        if ok and type(res)=="table" then
-            local code=tonumber(res.StatusCode or res.Status or 0) or 0
-            local rb=res.Body or res.body or ""
-            if code==0 or (code>=200 and code<300) then return true,rb end
-            return false,rb
+        local ok, res = pcall(req, {
+            Url = url,
+            Method = "POST",
+            Headers = headers,
+            Body = body,
+        })
+        if ok and res then
+            if type(res) == "table" and res.Body then return res.Body end
+            if type(res) == "string" and res ~= "" then return res end
         end
     end
-    local ok,res=pcall(function()
-        return S.HTTP:RequestAsync({Url=url,Method="POST",Headers=headers,Body=body})
+    -- fallback: syn/http_request không có -> dùng Http:PostAsync nếu executor hỗ trợ
+    local ok2, res2 = pcall(function()
+        return Http:PostAsync(url, body, Enum.HttpContentType.ApplicationJson, false, headers)
     end)
-    if ok and type(res)=="table" and res.Success then return true,res.Body or "" end
-    return false,nil
+    if ok2 and res2 then return res2 end
+    return nil
 end
 
-local function CheckKey(inputKey)
-    local key=Trim(inputKey)
-    if key=="" then return false end
-    if AuthDeviceId=="" then AuthDeviceId=GetDeviceId() end
-    if AuthIP=="" then AuthIP=GetPublicIP() end
-    local ok,raw=PostJSON(AUTH_URL,{["Content-Type"]="application/json",apikey=SUPABASE_APIKEY},{
-        key=key,
-        device_id=AuthDeviceId,
-        app_version=AUTH_APP_VERSION,
-        ip=AuthIP,
-    })
-    if not ok or type(raw)~="string" or raw=="" then return false end
-    local decodedOk,data=pcall(function() return S.HTTP:JSONDecode(raw) end)
-    return decodedOk and type(data)=="table" and data.ok==true and data.key_valid==true
+local function getHWID()
+    local ok, r = pcall(function()
+        if gethwid then return gethwid() end
+        return nil
+    end)
+    if ok and r ~= nil then
+        if type(r) == "table" then r = r[1] or r[2] or "" end
+        r = tostring(r):gsub("%s+", "")
+        if #r >= 3 then return r end
+    end
+    return "UID_" .. tostring(LP and LP.UserId or 0)
+end
+local HWID = getHWID()
+
+local REASONS = {
+    expired    = "Key đã hết hạn.\nBấm GET KEY để lấy key mới.",
+    wrong_hwid = "Key này thuộc về máy khác.",
+    not_found  = "Key không đúng.\nKiểm tra lại key vừa copy.",
+    missing    = "Thiếu key.",
+    disabled   = "Key đã bị vô hiệu hoá.",
+}
+
+-- ---------------- verify qua Supabase Edge Function ----------------
+local function verifyKey(key)
+    key = tostring(key or ""):gsub("%s+", ""):upper()
+    if key == "" then return false, "Chưa nhập key." end
+
+    local headers = {
+        ["Content-Type"] = "application/json",
+        ["apikey"]       = SUPABASE_KEY,
+    }
+    local payload = {
+        key         = key,
+        device_id   = HWID,
+        app_version = APP_VERSION,
+    }
+
+    local raw = httpPostJson(CHECK_URL, headers, payload)
+    if not raw or raw == "" then
+        return false, "Không kết nối được server.\nThử lại sau ít giây."
+    end
+
+    local ok, data = pcall(function() return Http:JSONDecode(raw) end)
+    if not ok or type(data) ~= "table" then
+        return false, "Server trả về sai định dạng."
+    end
+
+    if data.ok == true and data.key_valid == true then
+        return true, data.expiresAt
+    end
+    local reason = data.reason or data.message
+    if reason and REASONS[reason] then
+        return false, REASONS[reason]
+    end
+    return false, "Key không hợp lệ."
 end
 
-AuthDeviceId=GetDeviceId()
-task.spawn(function() AuthIP=GetPublicIP() end)
+local function saveKey(key)
+    pcall(function()
+        if writefile then writefile(SAVE_FILE, tostring(key):gsub("%s+", "")) end
+    end)
+end
 
-local function ShowAuth()
-    local auth=Instance.new("ScreenGui")
-    auth.Name="BdzHubAuth"
-    auth.ResetOnSpawn=false
-    auth.IgnoreGuiInset=true
-    auth.DisplayOrder=10001
-    auth.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
-    auth.Parent=parentGui
+local function clearSavedKey()
+    pcall(function()
+        if delfile and isfile and isfile(SAVE_FILE) then delfile(SAVE_FILE) end
+    end)
+end
 
-    local function mk(c,p,par)
-        local o=Instance.new(c)
-        for k,v in pairs(p) do pcall(function() o[k]=v end) end
-        o.Parent=par or auth
-        return o
-    end
-
-    local bg=mk("Frame",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.fromRGB(4,6,10),BackgroundTransparency=0.18,BorderSizePixel=0})
-    local card=mk("Frame",{Size=UDim2.new(0,400,0,330),Position=UDim2.new(0.5,-200,0.5,-165),BackgroundColor3=Color3.fromRGB(10,14,22),BorderSizePixel=0,Active=true},bg)
-    mk("UICorner",{CornerRadius=UDim.new(0,18)},card)
-    mk("UIStroke",{Color=Color3.fromRGB(40,88,140),Thickness=1,Transparency=0.2},card)
-    local glow=mk("Frame",{Size=UDim2.new(0,220,0,220),Position=UDim2.new(1,-110,0,-110),BackgroundColor3=Color3.fromRGB(88,196,255),BackgroundTransparency=0.94,BorderSizePixel=0},card)
-    mk("UICorner",{CornerRadius=UDim.new(1,0)},glow)
-
-    local logoWrap=mk("Frame",{Size=UDim2.new(0,78,0,78),Position=UDim2.new(0.5,-39,0,28),BackgroundColor3=Color3.fromRGB(18,22,32),BorderSizePixel=0},card)
-    mk("UICorner",{CornerRadius=UDim.new(0,20)},logoWrap)
-    mk("UIStroke",{Color=Color3.fromRGB(40,88,140),Thickness=1},logoWrap)
-    local logo=mk("ImageLabel",{Size=UDim2.new(1,-12,1,-12),Position=UDim2.new(0,6,0,6),BackgroundTransparency=1,Image=LogoAsset or "",ScaleType=Enum.ScaleType.Fit,ResampleMode=Enum.ResamplerMode.Default},logoWrap)
-    local glyph=mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="B",Font=Enum.Font.GothamBlack,TextSize=36,TextColor3=Color3.fromRGB(120,220,255),Visible=not LogoAsset},logoWrap)
-
-    local title=mk("TextLabel",{Size=UDim2.new(1,-40,0,28),Position=UDim2.new(0,20,0,122),BackgroundTransparency=1,Text="BDZ HUB",Font=Enum.Font.GothamBlack,TextSize=22,TextColor3=Color3.fromRGB(242,245,252),TextXAlignment=Enum.TextXAlignment.Center},card)
-    local sub=mk("TextLabel",{Size=UDim2.new(1,-60,0,20),Position=UDim2.new(0,30,0,151),BackgroundTransparency=1,Text="Enter your access key to continue",Font=Enum.Font.Gotham,TextSize=11,TextColor3=Color3.fromRGB(148,158,180),TextXAlignment=Enum.TextXAlignment.Center},card)
-
-    local input=mk("TextBox",{Size=UDim2.new(1,-44,0,48),Position=UDim2.new(0,22,0,188),BackgroundColor3=Color3.fromRGB(18,22,32),BorderSizePixel=0,ClearTextOnFocus=false,PlaceholderText="ENTER KEY",PlaceholderColor3=Color3.fromRGB(80,90,112),Text="",TextColor3=Color3.fromRGB(242,245,252),TextSize=13,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left},card)
-    mk("UICorner",{CornerRadius=UDim.new(0,12)},input)
-    mk("UIStroke",{Color=Color3.fromRGB(48,56,74),Thickness=1,Transparency=0.2},input)
-    mk("UIPadding",{PaddingLeft=UDim.new(0,14),PaddingRight=UDim.new(0,14)},input)
-
-    local verify=mk("TextButton",{Size=UDim2.new(1,-44,0,44),Position=UDim2.new(0,22,0,245),BackgroundColor3=Color3.fromRGB(40,88,140),BorderSizePixel=0,Text="VERIFY KEY",Font=Enum.Font.GothamBold,TextSize=12,TextColor3=Color3.fromRGB(242,245,252),AutoButtonColor=false},card)
-    mk("UICorner",{CornerRadius=UDim.new(0,12)},verify)
-    local status=mk("TextLabel",{Size=UDim2.new(1,-40,0,22),Position=UDim2.new(0,20,1,-28),BackgroundTransparency=1,Text="Enter a key to continue.",Font=Enum.Font.Gotham,TextSize=10,TextColor3=Color3.fromRGB(80,90,112),TextXAlignment=Enum.TextXAlignment.Center},card)
-
-    local busy=false
-    local function setStatus(txt,good)
-        status.Text=txt
-        status.TextColor3=good and Color3.fromRGB(72,235,168) or Color3.fromRGB(148,158,180)
-    end
-    local function verifyKey()
-        if busy then return end
-        local key=Trim(input.Text)
-        if key=="" then setStatus(AUTH_FAIL_MESSAGE,false) return end
-        busy=true
-        verify.Text="CHECKING..."
-        verify.BackgroundColor3=Color3.fromRGB(30,60,92)
-        setStatus("Checking key...",false)
-        task.spawn(function()
-            local good=CheckKey(key)
-            if good then
-                passed=true
-                setStatus("Key verified.",true)
-                task.wait(0.2)
-                auth:Destroy()
-            else
-                passed=false
-                setStatus(AUTH_FAIL_MESSAGE,false)
-                verify.Text="VERIFY KEY"
-                verify.BackgroundColor3=Color3.fromRGB(40,88,140)
-                input:CaptureFocus()
-            end
-            busy=false
-        end)
-    end
-
-    verify.MouseButton1Click:Connect(verifyKey)
-    input.FocusLost:Connect(function(enterPressed) if enterPressed then verifyKey() end end)
-    verify.MouseEnter:Connect(function() if not busy then verify.BackgroundColor3=Color3.fromRGB(52,108,166) end end)
-    verify.MouseLeave:Connect(function() if not busy then verify.BackgroundColor3=Color3.fromRGB(40,88,140) end end)
-
-    task.spawn(function()
-        while auth.Parent and not passed do
-            if LogoAsset then
-                logo.Image=LogoAsset
-                glyph.Visible=false
-            end
-            task.wait(0.15)
+-- ---------------- tự đăng nhập nếu key cũ còn hạn ----------------
+local passed = false
+do
+    local saved = nil
+    pcall(function()
+        if isfile and isfile(SAVE_FILE) and readfile then
+            saved = tostring(readfile(SAVE_FILE) or ""):gsub("%s+", "")
         end
     end)
-    task.spawn(function()
-        bg.BackgroundTransparency=1
-        card.Size=UDim2.new(0,400,0,0)
-        S.Tween:Create(bg,TweenInfo.new(0.3),{BackgroundTransparency=0.18}):Play()
-        S.Tween:Create(card,TweenInfo.new(0.45,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Size=UDim2.new(0,400,0,330)}):Play()
-    end)
+    if saved and saved ~= "" then
+        local ok = verifyKey(saved)
+        if ok then
+            passed = true
+            notify("BDZ HUB", "Key còn hạn — tự động đăng nhập ✔")
+        else
+            clearSavedKey()
+        end
+    end
 end
 
-ShowAuth()
+-- ---------------- UI nhập key (chỉ hiện khi chưa pass) ----------------
+if not passed then
+    local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
+    pcall(function()
+        local old = parentGui:FindFirstChild("BDZHubKeySystem")
+        if old then old:Destroy() end
+    end)
 
---// ================= MAIN SCRIPT =================
+    local T = {
+        bg0 = Color3.fromRGB(8, 10, 15), bg1 = Color3.fromRGB(13, 16, 23),
+        bg2 = Color3.fromRGB(18, 22, 32), bg3 = Color3.fromRGB(24, 29, 42),
+        text = Color3.fromRGB(242, 245, 252), dim = Color3.fromRGB(148, 158, 180),
+        faint = Color3.fromRGB(80, 90, 112), accent = Color3.fromRGB(88, 196, 255),
+        hot = Color3.fromRGB(120, 220, 255), ok = Color3.fromRGB(72, 235, 168),
+        danger = Color3.fromRGB(255, 100, 115),
+    }
 
--- BLOX FRUITS --
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "BDZHubKeySystem"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.Parent = parentGui
+
+    local W, H = 380, 470
+    local main = Instance.new("Frame")
+    main.Size = UDim2.new(0, W, 0, H)
+    main.Position = UDim2.new(0.5, -W / 2, 0.5, -H / 2)
+    main.BackgroundColor3 = T.bg0
+    main.BorderSizePixel = 0
+    main.Active = true
+    main.Draggable = true
+    main.Parent = gui
+
+    local mc = Instance.new("UICorner"); mc.CornerRadius = UDim.new(0, 16); mc.Parent = main
+    local ms = Instance.new("UIStroke"); ms.Color = T.accent; ms.Thickness = 1; ms.Transparency = 0.6; ms.Parent = main
+
+    local function label(txt, y, h, size, color, parent)
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(1, -48, 0, h)
+        l.Position = UDim2.new(0, 24, 0, y)
+        l.BackgroundTransparency = 1
+        l.Text = txt
+        l.Font = Enum.Font.GothamBold
+        l.TextSize = size
+        l.TextColor3 = color
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.TextWrapped = true
+        l.Parent = parent or main
+        return l
+    end
+
+    -- logo + title
+    local logo = Instance.new("Frame")
+    logo.Size = UDim2.new(0, 46, 0, 46)
+    logo.Position = UDim2.new(0, 24, 0, 20)
+    logo.BackgroundColor3 = T.bg3
+    logo.BorderSizePixel = 0
+    logo.Parent = main
+    local lc = Instance.new("UICorner"); lc.CornerRadius = UDim.new(1, 0); lc.Parent = logo
+    local lt = Instance.new("TextLabel")
+    lt.Size = UDim2.new(1, 0, 1, 0); lt.BackgroundTransparency = 1
+    lt.Text = "B"; lt.Font = Enum.Font.GothamBlack; lt.TextSize = 24
+    lt.TextColor3 = T.hot; lt.Parent = logo
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(0, 280, 0, 24); title.Position = UDim2.new(0, 82, 0, 22)
+    title.BackgroundTransparency = 1; title.Text = "BDZ HUB"
+    title.Font = Enum.Font.GothamBlack; title.TextSize = 19
+    title.TextColor3 = T.text; title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = main
+
+    local sub = Instance.new("TextLabel")
+    sub.Size = UDim2.new(0, 280, 0, 16); sub.Position = UDim2.new(0, 82, 0, 48)
+    sub.BackgroundTransparency = 1; sub.Text = "KEY SYSTEM · MỖI MÁY 1 KEY"
+    sub.Font = Enum.Font.Gotham; sub.TextSize = 10
+    sub.TextColor3 = T.faint; sub.TextXAlignment = Enum.TextXAlignment.Left
+    sub.Parent = main
+
+    -- status
+    local status = Instance.new("TextLabel")
+    status.Size = UDim2.new(1, -48, 0, 40); status.Position = UDim2.new(0, 24, 0, 78)
+    status.BackgroundTransparency = 1; status.Text = "Nhập key để sử dụng script."
+    status.Font = Enum.Font.Gotham; status.TextSize = 12
+    status.TextColor3 = T.dim; status.TextXAlignment = Enum.TextXAlignment.Left
+    status.TextYAlignment = Enum.TextYAlignment.Top; status.TextWrapped = true
+    status.Parent = main
+
+    local function setStatus(txt, color)
+        status.Text = txt
+        status.TextColor3 = color or T.dim
+    end
+
+    -- key input
+    label("YOUR KEY", 122, 14, 10, T.faint)
+    local keyBox = Instance.new("TextBox")
+    keyBox.Size = UDim2.new(1, -48, 0, 42); keyBox.Position = UDim2.new(0, 24, 0, 140)
+    keyBox.BackgroundColor3 = T.bg2; keyBox.BorderSizePixel = 0
+    keyBox.PlaceholderText = "BDZ-XXXX-XXXX-XXXX"
+    keyBox.PlaceholderColor3 = T.faint
+    keyBox.Text = ""; keyBox.Font = Enum.Font.Code; keyBox.TextSize = 14
+    keyBox.TextColor3 = T.hot; keyBox.ClearTextOnFocus = false
+    keyBox.Parent = main
+    local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(0, 10); kc.Parent = keyBox
+    local ks = Instance.new("UIStroke"); ks.Color = T.accent; ks.Thickness = 1; ks.Transparency = 0.6; ks.Parent = keyBox
+
+    local function button(txt, y, color1, color2)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, -48, 0, 44); b.Position = UDim2.new(0, 24, 0, y)
+        b.BackgroundColor3 = color1; b.BorderSizePixel = 0
+        b.Text = txt; b.Font = Enum.Font.GothamBlack; b.TextSize = 14
+        b.TextColor3 = Color3.new(1, 1, 1); b.AutoButtonColor = true
+        b.Parent = main
+        local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 11); c.Parent = b
+        return b
+    end
+
+    local verifyBtn = button("✔  VERIFY KEY", 192, Color3.fromRGB(30, 110, 82))
+
+    -- divider
+    local div = Instance.new("TextLabel")
+    div.Size = UDim2.new(1, -48, 0, 16); div.Position = UDim2.new(0, 24, 0, 244)
+    div.BackgroundTransparency = 1; div.Text = "— CHƯA CÓ KEY? —"
+    div.Font = Enum.Font.GothamBold; div.TextSize = 10
+    div.TextColor3 = T.faint; div.Parent = main
+
+    local getBtn = button("📋  GET KEY (COPY LINK)", 266, Color3.fromRGB(40, 88, 140))
+
+    -- link box (hiện link để copy tay nếu cần)
+    local linkBox = Instance.new("TextBox")
+    linkBox.Size = UDim2.new(1, -48, 0, 66); linkBox.Position = UDim2.new(0, 24, 0, 318)
+    linkBox.BackgroundColor3 = T.bg1; linkBox.BorderSizePixel = 0
+    linkBox.Text = "Bấm GET KEY để lấy link vượt..."; linkBox.Font = Enum.Font.Code; linkBox.TextSize = 11
+    linkBox.TextColor3 = T.dim; linkBox.TextWrapped = true
+    linkBox.TextXAlignment = Enum.TextXAlignment.Left; linkBox.TextYAlignment = Enum.TextYAlignment.Top
+    linkBox.ClearTextOnFocus = false; linkBox.TextEditable = true
+    linkBox.Parent = main
+    local lc2 = Instance.new("UICorner"); lc2.CornerRadius = UDim.new(0, 10); lc2.Parent = linkBox
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop = UDim.new(0, 8); pad.PaddingLeft = UDim.new(0, 10)
+    pad.PaddingRight = UDim.new(0, 10); pad.PaddingBottom = UDim.new(0, 8)
+    pad.Parent = linkBox
+
+    local foot = Instance.new("TextLabel")
+    foot.Size = UDim2.new(1, -48, 0, 60); foot.Position = UDim2.new(0, 24, 0, 392)
+    foot.BackgroundTransparency = 1
+    foot.Text = "Mở link bằng trình duyệt → vượt link → bấm NHẬN KEY → dán key vào ô trên → VERIFY.\nKey gắn theo máy (device ID)."
+    foot.Font = Enum.Font.Gotham; foot.TextSize = 11
+    foot.TextColor3 = T.faint; foot.TextXAlignment = Enum.TextXAlignment.Left
+    foot.TextYAlignment = Enum.TextYAlignment.Top; foot.TextWrapped = true
+    foot.Parent = main
+
+    -- ---------------- actions ----------------
+    getBtn.MouseButton1Click:Connect(function()
+        setStatus("Đang mở web lấy key...", T.dim)
+        local link = SERVER_URL
+        linkBox.Text = link
+        local copied = false
+        pcall(function()
+            if setclipboard then setclipboard(link); copied = true end
+        end)
+        if copied then
+            setStatus("✔ Đã COPY link! Mở trình duyệt, vượt link để lấy key.", T.ok)
+            notify("BDZ HUB", "Đã copy link vượt ✔")
+        else
+            setStatus("✔ Link đã hiện ở ô bên dưới — copy tay rồi mở trình duyệt.", T.ok)
+        end
+        pcall(function()
+            if setclipboard then setclipboard(link) end
+        end)
+    end)
+
+    verifyBtn.MouseButton1Click:Connect(function()
+        setStatus("Đang kiểm tra key...", T.dim)
+        local ok, info = verifyKey(keyBox.Text)
+        if ok then
+            saveKey(keyBox.Text)
+            local left = ""
+            if type(info) == "number" then
+                local h = math.max(0, math.floor((info / 1000 - os.time()) / 3600))
+                left = " (còn ~" .. h .. "h)"
+            end
+            setStatus("✔ Key hợp lệ" .. left .. "! Đang mở script...", T.ok)
+            notify("BDZ HUB", "Key hợp lệ ✔")
+            task.wait(0.8)
+            gui:Destroy()
+            passed = true
+        else
+            setStatus("✘ " .. tostring(info), T.danger)
+        end
+    end)
+
+    -- chặn script chạy tiếp cho tới khi nhập key đúng
+    while not passed do
+        task.wait(0.2)
+    end
+end
+
+--// ============================================================
+--//  TỚI ĐÂY LÀ KEY ĐÃ HỢP LỆ — CODE SCRIPT CHÍNH Ở BÊN DƯỚI
+--// ============================================================
+
+
+--// ================= MAIN SCRIPT: BDZ HUB =================
+
+-- BLOX FRUITS · BDZ HUB · v7.0
 for _,g in ipairs((gethui and {gethui()} or {game:GetService("CoreGui")})) do
-    local o=g:FindFirstChild("BF_BdzHub"); if o then o:Destroy() end
-    local l=g:FindFirstChild("BdzHubLoading"); if l then l:Destroy() end
+    local o=g:FindFirstChild("BF_BDZHub"); if o then o:Destroy() end
+    local l=g:FindFirstChild("BDZHubLoading"); if l then l:Destroy() end
 end
 
 local S={Players=game:GetService("Players"),RunService=game:GetService("RunService"),
@@ -232,39 +402,10 @@ for s,ids in pairs(SEAP) do if ids[PlaceId] then SeaIndex=s break end end
 local MOB_DISPLAY={["God's Guard"]="Sky Guards"}
 local function DisplayName(n) return MOB_DISPLAY[n] or n end
 
-local LOGO_URL="https://263.org.vn/logo"
-local LogoAsset=nil
-local LOGO_FILENAME="bdz_hub_logo.jpg"
-local function DetectLogoExt(data)
-    if type(data)~="string" then return ".png" end
-    if data:sub(1,8)=="\137PNG\r\n\026\n" then return ".png" end
-    if data:sub(1,3)=="\255\216\255" then return ".jpg" end
-    if data:sub(1,4)=="GIF8" then return ".gif" end
-    if data:sub(1,4)=="RIFF" and data:sub(9,12)=="WEBP" then return ".webp" end
-    return ".png"
-end
-local function LoadRemoteLogo()
-    if not writefile then return nil end
-    local assetLoader=getcustomasset or getsynasset
-    if not assetLoader then return nil end
-    local ok,data=pcall(function() return game:HttpGet(LOGO_URL) end)
-    if not ok or type(data)~="string" or #data<32 then return nil end
-    local path="bdz_hub_logo"..DetectLogoExt(data)
-    LOGO_FILENAME=path
-    pcall(function() writefile(path,data) end)
-    local okAsset,asset=pcall(function() return assetLoader(path) end)
-    if okAsset and asset then return asset end
-    return nil
-end
-task.spawn(function() LogoAsset=LoadRemoteLogo() end)
-
 local loadingDone=false
-local AUTHENTICATED=false
-local SUPABASE_URL="https://nklukqriopezsoalnghm.supabase.co/functions/v1/check-key"
-local SUPABASE_APIKEY=getgenv().BDZ_SUPABASE_APIKEY or ""
 do
     local lg=Instance.new("ScreenGui")
-    lg.Name="BdzHubLoading"; lg.ResetOnSpawn=false; lg.IgnoreGuiInset=true
+    lg.Name="BDZHubLoading"; lg.ResetOnSpawn=false; lg.IgnoreGuiInset=true
     lg.DisplayOrder=9999; lg.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; lg.Parent=parentGui
     local function mk(c,p)
         local o=Instance.new(c)
@@ -302,12 +443,11 @@ do
             task.wait(1.2)
         end
     end)
-    local card=mk("Frame",{Size=UDim2.new(0,76,0,76),Position=UDim2.new(0.5,-38,0.5,-38),BackgroundColor3=Color3.fromRGB(10,14,22),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=10,Parent=orbit})
-    mk("UICorner",{CornerRadius=UDim.new(0,21)},card)
+    local card=mk("Frame",{Size=UDim2.new(0,70,0,70),Position=UDim2.new(0.5,-35,0.5,-35),BackgroundColor3=Color3.fromRGB(10,14,22),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=10,Parent=orbit})
+    mk("UICorner",{CornerRadius=UDim.new(0,20)},card)
     local cs=mk("UIStroke",{Color=Color3.fromRGB(88,196,255),Thickness=1.5,Transparency=1},card)
-    local logoImg=mk("ImageLabel",{Size=UDim2.new(1,-16,1,-16),Position=UDim2.new(0,8,0,8),BackgroundTransparency=1,Image=LogoAsset or "",ImageTransparency=1,ScaleType=Enum.ScaleType.Fit,ResampleMode=Enum.ResamplerMode.Default,ZIndex=11,Parent=card})
-    local glyph=mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="B",Font=Enum.Font.GothamBlack,TextSize=40,TextColor3=Color3.fromRGB(160,220,255),TextTransparency=1,ZIndex=10,Parent=card})
-    local title=mk("TextLabel",{Size=UDim2.new(1,0,0,40),Position=UDim2.new(0,0,0,250),BackgroundTransparency=1,Text="BDZ HUB",Font=Enum.Font.GothamBlack,TextSize=28,TextColor3=Color3.fromRGB(242,245,252),TextTransparency=1,ZIndex=7,Parent=stage})
+    local glyph=mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="B",Font=Enum.Font.GothamBlack,TextSize=40,TextColor3=Color3.fromRGB(160,220,255),TextTransparency=1,ZIndex=11,Parent=card})
+    local title=mk("TextLabel",{Size=UDim2.new(1,0,0,40),Position=UDim2.new(0,0,0,250),BackgroundTransparency=1,Text="B D Z  H U B",Font=Enum.Font.GothamBlack,TextSize=28,TextColor3=Color3.fromRGB(242,245,252),TextTransparency=1,ZIndex=7,Parent=stage})
     local sub=mk("TextLabel",{Size=UDim2.new(1,0,0,18),Position=UDim2.new(0,0,0,292),BackgroundTransparency=1,Text="INITIALIZING",Font=Enum.Font.GothamBold,TextSize=11,TextColor3=Color3.fromRGB(140,158,190),TextTransparency=1,ZIndex=7,Parent=stage})
     local trk=mk("Frame",{Size=UDim2.new(0,360,0,3),Position=UDim2.new(0.5,-180,0,330),BackgroundColor3=Color3.fromRGB(24,30,44),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=7,Parent=stage})
     mk("UICorner",{CornerRadius=UDim.new(1,0)},trk)
@@ -326,24 +466,7 @@ do
         S.Tween:Create(card,TweenInfo.new(0.5),{BackgroundTransparency=0}):Play()
         S.Tween:Create(cs,TweenInfo.new(0.5),{Transparency=0.3}):Play()
         task.wait(0.1)
-        if LogoAsset then
-            logoImg.Image=LogoAsset
-            S.Tween:Create(logoImg,TweenInfo.new(0.5),{ImageTransparency=0}):Play()
-            glyph.TextTransparency=1
-        else
-            S.Tween:Create(glyph,TweenInfo.new(0.5),{TextTransparency=0}):Play()
-            task.spawn(function()
-                for _=1,30 do
-                    task.wait(0.15)
-                    if LogoAsset then
-                        logoImg.Image=LogoAsset
-                        S.Tween:Create(logoImg,TweenInfo.new(0.35),{ImageTransparency=0}):Play()
-                        S.Tween:Create(glyph,TweenInfo.new(0.25),{TextTransparency=1}):Play()
-                        break
-                    end
-                end
-            end)
-        end
+        S.Tween:Create(glyph,TweenInfo.new(0.5),{TextTransparency=0}):Play()
         task.wait(0.25)
         S.Tween:Create(title,TweenInfo.new(0.5),{TextTransparency=0}):Play()
         task.wait(0.15)
@@ -355,7 +478,7 @@ do
     local phases={{t="loading",h="interface",d=0.25,p=15},{t="remotes",h="CommF_",d=0.25,p=35},{t="sea",h="sea "..SeaIndex,d=0.25,p=55},{t="panels",h="7 tabs",d=0.30,p=75},{t="ready",h="welcome",d=0.30,p=100}}
     task.spawn(function()
         for _,ph in ipairs(phases) do
-            pctL.Text=ph.t.."  |  "..ph.h
+            pctL.Text=ph.t.."  ·  "..ph.h
             pct.Text=ph.p.."%"
             S.Tween:Create(fill,TweenInfo.new(ph.d,Enum.EasingStyle.Quint),{Size=UDim2.new(ph.p/100,0,1,0)}):Play()
             task.wait(ph.d)
@@ -364,7 +487,6 @@ do
         S.Tween:Create(back,TweenInfo.new(0.5),{BackgroundTransparency=1}):Play()
         for _,r in ipairs(rings) do pcall(function() S.Tween:Create(r.s,TweenInfo.new(0.4),{Transparency=1}):Play() end) end
         S.Tween:Create(glyph,TweenInfo.new(0.4),{TextTransparency=1}):Play()
-        S.Tween:Create(logoImg,TweenInfo.new(0.4),{ImageTransparency=1}):Play()
         S.Tween:Create(card,TweenInfo.new(0.4),{BackgroundTransparency=1}):Play()
         S.Tween:Create(cs,TweenInfo.new(0.4),{Transparency=1}):Play()
         S.Tween:Create(title,TweenInfo.new(0.4),{TextTransparency=1}):Play()
@@ -526,7 +648,7 @@ local MoveTo,TeleportTo,BringMobs,DoAttack,StopMoving
 do
     local Block=Instance.new("Part")
     Block.Size=Vector3.new(1,1,1); Block.Anchored=true; Block.CanCollide=false; Block.CanTouch=false
-    Block.Transparency=1; Block.Name="BdzHub_MoveBlock"; Block.Parent=S.WS
+    Block.Transparency=1; Block.Name="BDZHub_MoveBlock"; Block.Parent=S.WS
     local ShouldTween,TweenInst=false,nil
     StopMoving=function()
         ShouldTween=false
@@ -657,7 +779,7 @@ end
 local function RunChestFarm()
     local c=FindNearestChest()
     if c then State.SubStatus="Chest Farm"; TeleportTo(CFrame.new(c.Position+Vector3.new(0,3,0))); task.wait(0.15)
-    else State.SubStatus="Chest - none"; task.wait(0.5) end
+    else State.SubStatus="Chest — none"; task.wait(0.5) end
 end
 local function FindBoss(name)
     local en=S.WS:FindFirstChild("Enemies")
@@ -667,11 +789,11 @@ local function FindBoss(name)
     return nil
 end
 local function FarmMobTarget(mob,label)
-    if not mob then State.SubStatus=label.." - none" return false end
+    if not mob then State.SubStatus=label.." — none" return false end
     local hrp=GetRoot(); if not hrp then return false end
     local mrp=mob:FindFirstChild("HumanoidRootPart"); if not mrp then return false end
     EquipWeapon()
-    State.SubStatus=label.." - "..DisplayName(mob.Name)
+    State.SubStatus=label.." — "..DisplayName(mob.Name)
     local mobPos=mrp.Position
     local tcf=CFrame.new(mobPos+Vector3.new(0,State.HoverHeight,5))
     local dist=(hrp.Position-tcf.Position).Magnitude
@@ -686,16 +808,16 @@ local function FarmMobTarget(mob,label)
 end
 local function RunBossFarm()
     local b=FindBoss(State.SelectedBoss)
-    if b then FarmMobTarget(b,"Boss") else State.SubStatus="Boss - searching" task.wait(0.5) end
+    if b then FarmMobTarget(b,"Boss") else State.SubStatus="Boss — searching" task.wait(0.5) end
 end
 local function RunNearestMobFarm()
     local m=FindNearestMob(3000)
-    if not m then State.SubStatus="Nearest - none" task.wait(0.5) return end
+    if not m then State.SubStatus="Nearest — none" task.wait(0.5) return end
     FarmMobTarget(m,"Nearest")
 end
 local function RunSpecificMobFarm()
     local m=FindMob(State.SelectedMob)
-    if not m then State.SubStatus="Specific - no "..DisplayName(State.SelectedMob) task.wait(0.5) return end
+    if not m then State.SubStatus="Specific — no "..DisplayName(State.SelectedMob) task.wait(0.5) return end
     FarmMobTarget(m,"Specific")
 end
 
@@ -736,7 +858,7 @@ local function RunBuyChip()
     if HasChip() then return end
     if tick()-State.LastChipBuy<5 then return end
     State.LastChipBuy=tick()
-    State.SubStatus="Raid - Beli chip"
+    State.SubStatus="Raid — Beli chip"
     pcall(function() Invoke("RaidsNpc","Select",State.RaidChip) end)
     task.wait(2)
     if HasChip() then return end
@@ -745,7 +867,7 @@ local function RunBuyChip()
     if HasChip() then return end
     for _,fn in ipairs(DATA.CHEAP) do
         local s=fn:match("^([^%-]+)") or fn
-        State.SubStatus="Raid - "..s
+        State.SubStatus="Raid — "..s
         pcall(function() Invoke("LoadFruit",fn) end)
         local ok=false
         for _=1,10 do task.wait(0.2) if FruitInBackpack(fn) then ok=true break end end
@@ -755,19 +877,19 @@ local function RunBuyChip()
         end
         if not ok then continue end
         pcall(function() Invoke("RaidsNpc","Select",State.RaidChip) end)
-        for _=1,20 do task.wait(0.25) if HasChip() then State.SubStatus="Raid - chip ready" State.RaidClickAttempts=0 return end end
+        for _=1,20 do task.wait(0.25) if HasChip() then State.SubStatus="Raid — chip ready" State.RaidClickAttempts=0 return end end
     end
-    State.SubStatus="Raid - chip fail"
+    State.SubStatus="Raid — chip fail"
     task.wait(2)
 end
 local function RunStartRaid()
     if InRaid() then State.RaidClickAttempts=0 return end
-    if not HasChip() then State.SubStatus="Raid - waiting chip" return end
+    if not HasChip() then State.SubStatus="Raid — waiting chip" return end
     if tick()-State.LastSummonTry<3 then return end
     State.LastSummonTry=tick()
     State.RaidClickAttempts=State.RaidClickAttempts+1
     UnequipChip(); task.wait(0.2)
-    State.SubStatus="Raid - finding summon"
+    State.SubStatus="Raid — finding summon"
     local summon=nil
     local map=S.WS:FindFirstChild("Map")
     if map then
@@ -783,7 +905,7 @@ local function RunStartRaid()
         if not buttonPart then for _,d in ipairs(summon:GetDescendants()) do if d:IsA("BasePart") and d:FindFirstChildOfClass("ClickDetector") then buttonPart=d break end end end
         if not buttonPart then for _,d in ipairs(summon:GetDescendants()) do if d:IsA("BasePart") and d.Name=="Main" then buttonPart=d break end end end
         if buttonPart then
-            State.SubStatus="Raid - walking in"
+            State.SubStatus="Raid — walking in"
             local hrp=GetRoot()
             if hrp then
                 local approach=buttonPart.Position+Vector3.new(0,3,30)
@@ -808,16 +930,16 @@ local function RunStartRaid()
         if R.Btn then pcall(function() R.Btn:FireServer("Start",State.RaidChip) end) end
         if R.CommF then pcall(function() R.CommF:InvokeServer("Raid",State.RaidChip) end); pcall(function() R.CommF:InvokeServer("StartRaid",State.RaidChip) end) end
     else
-        State.SubStatus="Raid - no summon"
+        State.SubStatus="Raid — no summon"
         if R.CommF then pcall(function() R.CommF:InvokeServer("StartRaid",State.RaidChip) end) end
     end
-    State.SubStatus="Raid - verifying"
-    for _=1,15 do task.wait(0.4) if InRaid() then State.SubStatus="Raid - started" State.RaidClickAttempts=0 return end end
-    State.SubStatus="Raid - retry "..State.RaidClickAttempts
+    State.SubStatus="Raid — verifying"
+    for _=1,15 do task.wait(0.4) if InRaid() then State.SubStatus="Raid — started" State.RaidClickAttempts=0 return end end
+    State.SubStatus="Raid — retry "..State.RaidClickAttempts
     if State.RaidClickAttempts>=4 then State.RaidClickAttempts=0 State.LastChipBuy=0 end
 end
 local function RunClearRaid()
-    if not InRaid() then State.SubStatus="Raid - waiting" return end
+    if not InRaid() then State.SubStatus="Raid — waiting" return end
     if State.RaidChip=="Magma" or State.RaidChip=="Flame" then
         local map=S.WS:FindFirstChild("Map")
         if map then for _,d in ipairs(map:GetDescendants()) do if d.Name=="Lava" and d.Parent then pcall(function() d:Destroy() end) end end end
@@ -828,17 +950,17 @@ local function RunClearRaid()
     local locs=origin and origin:FindFirstChild("Locations")
     if locs then
         local hrp=GetRoot()
-        if hrp then for _,n in ipairs(names) do local t=locs:FindFirstChild(n) if t and (t.Position-hrp.Position).Magnitude<=3000 then found=t State.SubStatus="Raid - "..n break end end end
+        if hrp then for _,n in ipairs(names) do local t=locs:FindFirstChild(n) if t and (t.Position-hrp.Position).Magnitude<=3000 then found=t State.SubStatus="Raid — "..n break end end end
     end
     if not found then
         local rm=S.WS:FindFirstChild("RaidMap")
-        if rm then for _,n in ipairs(names) do local t=rm:FindFirstChild(n) if t then found=t State.SubStatus="Raid - "..n break end end end
+        if rm then for _,n in ipairs(names) do local t=rm:FindFirstChild(n) if t then found=t State.SubStatus="Raid — "..n break end end end
     end
     if found then
         local hrp=GetRoot()
         local p=found:IsA("BasePart") and found.Position or found:GetPivot().Position
         if hrp and (hrp.Position-p).Magnitude>100 then TeleportTo(CFrame.new(p+Vector3.new(0,120,0))) task.wait(0.3) end
-    else State.SubStatus="Raid - clearing" end
+    else State.SubStatus="Raid — clearing" end
     local en=S.WS:FindFirstChild("Enemies")
     if en then
         local hrp=GetRoot()
@@ -960,7 +1082,7 @@ local function RunLevelFarm()
         if changed or done then
             local hrp=GetRoot()
             if hrp and (hrp.Position-gcf.Position).Magnitude>12 then
-                State.SubStatus="> quest giver"
+                State.SubStatus="→ quest giver"
                 MoveTo(gcf+Vector3.new(0,5,3))
                 task.wait(0.05)
                 return
@@ -979,7 +1101,7 @@ local function RunLevelFarm()
         State.SubStatus=string.format("%s [%d]",DisplayName(mn),State.MyLevel)
         FarmMobTarget(live,"Level")
     else
-        State.SubStatus="Traveling > "..DisplayName(mn)
+        State.SubStatus="Traveling → "..DisplayName(mn)
         MoveTo(gcf)
     end
     TrackKills(mn)
@@ -995,8 +1117,8 @@ local MainLoop=function()
             if State.AutoClearRaid and InRaid() then RunClearRaid()
             elseif HasChip() and not InRaid() then RunStartRaid()
             elseif State.AutoBuyChip and not HasChip() then RunBuyChip()
-            elseif State.AutoClearRaid then State.SubStatus="Raid - waiting"
-            else State.SubStatus="Raid - waiting chip" end
+            elseif State.AutoClearRaid then State.SubStatus="Raid — waiting"
+            else State.SubStatus="Raid — waiting chip" end
         elseif State.AutoBossFarm then RunBossFarm()
         elseif State.AutoNearestMob then RunNearestMobFarm()
         elseif State.AutoSpecificMob then RunSpecificMobFarm()
@@ -1079,9 +1201,9 @@ do
         return f
     end
     local sg=Instance.new("ScreenGui")
-    sg.Name="BF_BdzHub"; sg.ResetOnSpawn=false; sg.IgnoreGuiInset=true
+    sg.Name="BF_BDZHub"; sg.ResetOnSpawn=false; sg.IgnoreGuiInset=true
     sg.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; sg.Parent=parentGui
-    local W,H=IS_MOBILE and 400 or 640, IS_MOBILE and 340 or 470
+    local W,H=IS_MOBILE and 400 or 620, IS_MOBILE and 340 or 460
     local main=mk("Frame",{Size=UDim2.new(0,W,0,H),Position=UDim2.new(0.5,-W/2,0.5,-H/2),BackgroundColor3=T.bg0,BorderSizePixel=0,Active=true,ClipsDescendants=true},sg)
     mk("UICorner",{CornerRadius=UDim.new(0,18)},main)
     mk("UIStroke",{Color=T.accentDim,Thickness=1,Transparency=0.55,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},main)
@@ -1092,59 +1214,46 @@ do
     mk("UICorner",{CornerRadius=UDim.new(1,0)},glowBL)
     local topLine=mk("Frame",{Size=UDim2.new(1,-36,0,1),Position=UDim2.new(0,18,0,0),BackgroundColor3=T.accent,BorderSizePixel=0,ZIndex=10},main)
     mk("UIGradient",{Color=ColorSequence.new({ColorSequenceKeypoint.new(0,T.bg0),ColorSequenceKeypoint.new(0.25,T.accent),ColorSequenceKeypoint.new(0.5,T.violet),ColorSequenceKeypoint.new(0.75,T.accent),ColorSequenceKeypoint.new(1,T.bg0)})},topLine)
-    local header=mk("Frame",{Size=UDim2.new(1,0,0,70),BackgroundColor3=T.bg1,BackgroundTransparency=0.08,BorderSizePixel=0,ZIndex=2},main)
+    local header=mk("Frame",{Size=UDim2.new(1,0,0,64),BackgroundColor3=T.bg1,BackgroundTransparency=0.15,BorderSizePixel=0,ZIndex=2},main)
     mk("UICorner",{CornerRadius=UDim.new(0,18)},header)
-    mk("Frame",{Size=UDim2.new(1,0,0.55,0),Position=UDim2.new(0,0,0.45,0),BackgroundColor3=T.bg1,BackgroundTransparency=0.08,BorderSizePixel=0,ZIndex=2},header)
-    mk("UIGradient",{Color=ColorSequence.new({ColorSequenceKeypoint.new(0,T.bg1),ColorSequenceKeypoint.new(0.55,T.bg2),ColorSequenceKeypoint.new(1,T.bg1)}),Rotation=0},header)
-    local logoBox=mk("Frame",{Size=UDim2.new(0,48,0,48),Position=UDim2.new(0,18,0.5,-24),BackgroundColor3=T.bg3,BorderSizePixel=0,ZIndex=4},header)
-    mk("UICorner",{CornerRadius=UDim.new(0,15)},logoBox)
-    mk("UIStroke",{Color=T.accentDim,Thickness=1,Transparency=0.15},logoBox)
-    local logoGlow=mk("Frame",{Size=UDim2.new(0,30,0,30),Position=UDim2.new(0.5,-15,0.5,-15),BackgroundColor3=T.accent,BackgroundTransparency=0.96,BorderSizePixel=0,ZIndex=5,Parent=logoBox},nil)
-    mk("UICorner",{CornerRadius=UDim.new(1,0)},logoGlow)
-    local headerLogo=mk("ImageLabel",{Size=UDim2.new(1,-10,1,-10),Position=UDim2.new(0,5,0,5),BackgroundTransparency=1,Image=LogoAsset or "",ScaleType=Enum.ScaleType.Fit,ResampleMode=Enum.ResamplerMode.Default,ZIndex=7,Parent=logoBox})
-    local headerGlyph=mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="B",Font=F.black,TextSize=22,TextColor3=T.accentHot,ZIndex=6},logoBox)
-    mk("TextLabel",{Size=UDim2.new(0,260,0,20),Position=UDim2.new(0,80,0,13),BackgroundTransparency=1,Text="BDZ HUB",Font=F.black,TextSize=17,TextColor3=T.text,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
-    local seaLbl=mk("TextLabel",{Size=UDim2.new(0,260,0,15),Position=UDim2.new(0,80,0,38),BackgroundTransparency=1,Text="v1.0  |  sea "..SeaIndex,Font=F.reg,TextSize=11,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
-    local pill=mk("Frame",{Size=UDim2.new(0,108,0,28),Position=UDim2.new(1,-194,0.5,-14),BackgroundColor3=T.bg2,BorderSizePixel=0,ZIndex=4},header)
+    mk("Frame",{Size=UDim2.new(1,0,0.5,0),Position=UDim2.new(0,0,0.5,0),BackgroundColor3=T.bg1,BackgroundTransparency=0.15,BorderSizePixel=0,ZIndex=2},header)
+    local logoBox=mk("Frame",{Size=UDim2.new(0,40,0,40),Position=UDim2.new(0,18,0.5,-20),BackgroundColor3=T.bg3,BorderSizePixel=0,ZIndex=4},header)
+    mk("UICorner",{CornerRadius=UDim.new(0,12)},logoBox)
+    mk("UIStroke",{Color=T.accentDim,Thickness=1,Transparency=0.3},logoBox)
+    local inner=mk("Frame",{Size=UDim2.new(0,26,0,26),Position=UDim2.new(0.5,-13,0.5,-13),BackgroundColor3=T.accent,BackgroundTransparency=0.86,BorderSizePixel=0,ZIndex=5,Parent=logoBox},nil)
+    mk("UICorner",{CornerRadius=UDim.new(1,0)},inner)
+    mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="B",Font=F.black,TextSize=22,TextColor3=T.accentHot,ZIndex=6},logoBox)
+    mk("TextLabel",{Size=UDim2.new(0,260,0,20),Position=UDim2.new(0,72,0,12),BackgroundTransparency=1,Text="BDZ HUB",Font=F.black,TextSize=17,TextColor3=T.text,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
+    local seaLbl=mk("TextLabel",{Size=UDim2.new(0,260,0,15),Position=UDim2.new(0,72,0,34),BackgroundTransparency=1,Text="v7.0  ·  sea "..SeaIndex,Font=F.reg,TextSize=11,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
+    local pill=mk("Frame",{Size=UDim2.new(0,108,0,28),Position=UDim2.new(1,-186,0.5,-14),BackgroundColor3=T.bg2,BorderSizePixel=0,ZIndex=4},header)
     mk("UICorner",{CornerRadius=UDim.new(1,0)},pill)
     local pillStroke=mk("UIStroke",{Color=T.border2,Thickness=1,Transparency=0.4},pill)
     local pillDot=mk("Frame",{Size=UDim2.new(0,8,0,8),Position=UDim2.new(0,14,0.5,-4),BackgroundColor3=T.textFaint,BorderSizePixel=0,ZIndex=5},pill)
     mk("UICorner",{CornerRadius=UDim.new(1,0)},pillDot)
     local pillText=mk("TextLabel",{Size=UDim2.new(1,-30,1,0),Position=UDim2.new(0,28,0,0),BackgroundTransparency=1,Text="IDLE",Font=F.bold,TextSize=11,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=5},pill)
-    local minBtn=mk("TextButton",{Size=UDim2.new(0,32,0,32),Position=UDim2.new(1,-80,0.5,-16),BackgroundColor3=T.bg3,BorderSizePixel=0,Text="-",Font=F.bold,TextSize=16,TextColor3=T.text,AutoButtonColor=false,ZIndex=6},header)
+    local minBtn=mk("TextButton",{Size=UDim2.new(0,32,0,32),Position=UDim2.new(1,-76,0.5,-16),BackgroundColor3=T.bg3,BorderSizePixel=0,Text="—",Font=F.bold,TextSize=16,TextColor3=T.text,AutoButtonColor=false,ZIndex=6},header)
     mk("UICorner",{CornerRadius=UDim.new(0,10)},minBtn)
-    local closeBtn=mk("TextButton",{Size=UDim2.new(0,32,0,32),Position=UDim2.new(1,-42,0.5,-16),BackgroundColor3=T.bg3,BorderSizePixel=0,Text="X",Font=F.bold,TextSize=15,TextColor3=T.text,AutoButtonColor=false,ZIndex=6},header)
+    local closeBtn=mk("TextButton",{Size=UDim2.new(0,32,0,32),Position=UDim2.new(1,-40,0.5,-16),BackgroundColor3=T.bg3,BorderSizePixel=0,Text="✕",Font=F.bold,TextSize=15,TextColor3=T.text,AutoButtonColor=false,ZIndex=6},header)
     mk("UICorner",{CornerRadius=UDim.new(0,10)},closeBtn)
-    local body=mk("Frame",{Size=UDim2.new(1,0,1,-70),Position=UDim2.new(0,0,0,70),BackgroundTransparency=1,ZIndex=2},main)
-    local sidebar=mk("Frame",{Size=UDim2.new(0,156,1,-24),Position=UDim2.new(0,12,0,12),BackgroundColor3=T.bg1,BackgroundTransparency=0.3,BorderSizePixel=0},body)
+    local body=mk("Frame",{Size=UDim2.new(1,0,1,-64),Position=UDim2.new(0,0,0,64),BackgroundTransparency=1,ZIndex=2},main)
+    local sidebar=mk("Frame",{Size=UDim2.new(0,146,1,-24),Position=UDim2.new(0,12,0,12),BackgroundColor3=T.bg1,BackgroundTransparency=0.3,BorderSizePixel=0},body)
     mk("UICorner",{CornerRadius=UDim.new(0,14)},sidebar)
     mk("UIStroke",{Color=T.border,Thickness=1,Transparency=0.5},sidebar)
     mk("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},sidebar)
     mk("UIPadding",{PaddingTop=UDim.new(0,12),PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,12)},sidebar)
-    mk("TextLabel",{Size=UDim2.new(1,0,0,18),BackgroundTransparency=1,Text="NAVIGATION",Font=F.bold,TextSize=9,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=0},sidebar)
-    local pageHolder=mk("Frame",{Size=UDim2.new(1,-190,1,-24),Position=UDim2.new(0,178,0,12),BackgroundColor3=T.bg1,BackgroundTransparency=0.3,BorderSizePixel=0},body)
+    local pageHolder=mk("Frame",{Size=UDim2.new(1,-180,1,-24),Position=UDim2.new(0,168,0,12),BackgroundColor3=T.bg1,BackgroundTransparency=0.3,BorderSizePixel=0},body)
     mk("UICorner",{CornerRadius=UDim.new(0,14)},pageHolder)
     mk("UIStroke",{Color=T.border,Thickness=1,Transparency=0.5},pageHolder)
     local pages,tabBtns={},{}
-    local tabIcons={Home="H",Farm="F",Attack="A",Raid="R",Misc="M",FPS="P",About="I"}
     local function makeTab(lbl,o,n)
-        local b=mk("TextButton",{Size=UDim2.new(1,0,0,37),BackgroundColor3=T.bg2,BackgroundTransparency=0.62,BorderSizePixel=0,Text="",AutoButtonColor=false,LayoutOrder=o},sidebar)
-        mk("UICorner",{CornerRadius=UDim.new(0,10)},b)
-        local ind=mk("Frame",{Size=UDim2.new(0,3,0,20),Position=UDim2.new(0,4,0.5,-10),BackgroundColor3=T.accent,BorderSizePixel=0,Visible=false},b)
+        local b=mk("TextButton",{Size=UDim2.new(1,0,0,34),BackgroundColor3=T.bg2,BackgroundTransparency=0.5,BorderSizePixel=0,Text="",AutoButtonColor=false,LayoutOrder=o},sidebar)
+        mk("UICorner",{CornerRadius=UDim.new(0,9)},b)
+        local ind=mk("Frame",{Size=UDim2.new(0,3,0,16),Position=UDim2.new(0,6,0.5,-8),BackgroundColor3=T.accent,BorderSizePixel=0,Visible=false},b)
         mk("UICorner",{CornerRadius=UDim.new(1,0)},ind)
-        local dot=mk("Frame",{Size=UDim2.new(0,7,0,7),Position=UDim2.new(0,16,0.5,-3.5),BackgroundColor3=T.textFaint,BorderSizePixel=0},b)
+        local dot=mk("Frame",{Size=UDim2.new(0,6,0,6),Position=UDim2.new(0,18,0.5,-3),BackgroundColor3=T.textFaint,BorderSizePixel=0},b)
         mk("UICorner",{CornerRadius=UDim.new(1,0)},dot)
-        local icon=mk("TextLabel",{Size=UDim2.new(0,24,0,24),Position=UDim2.new(0,18,0.5,-12),BackgroundColor3=T.bg4,BackgroundTransparency=0.15,Text=tabIcons[n] or "B",Font=F.black,TextSize=11,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Center,TextYAlignment=Enum.TextYAlignment.Center},b)
-        mk("UICorner",{CornerRadius=UDim.new(0,8)},icon)
-        mk("UIStroke",{Color=T.border2,Thickness=1,Transparency=0.55},icon)
-        local t=mk("TextLabel",{Size=UDim2.new(1,-54,1,0),Position=UDim2.new(0,53,0,0),BackgroundTransparency=1,Text=lbl,Font=F.med,TextSize=12,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd},b)
-        tabBtns[n]={btn=b,ind=ind,dot=dot,lbl=t,icon=icon}
-        b.MouseEnter:Connect(function()
-            if not b:GetAttribute("BDZActive") then tw(b,0.15,{BackgroundColor3=T.bg3,BackgroundTransparency=0.25}) end
-        end)
-        b.MouseLeave:Connect(function()
-            if not b:GetAttribute("BDZActive") then tw(b,0.15,{BackgroundColor3=T.bg2,BackgroundTransparency=0.62}) end
-        end)
+        local t=mk("TextLabel",{Size=UDim2.new(1,-40,1,0),Position=UDim2.new(0,30,0,0),BackgroundTransparency=1,Text=lbl,Font=F.med,TextSize=12,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Left},b)
+        tabBtns[n]={btn=b,ind=ind,dot=dot,lbl=t}
     end
     local function newPage(n)
         local p=mk("Frame",{Name=n,Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Visible=false},pageHolder)
@@ -1162,10 +1271,9 @@ do
     local scAbout=newPage("About")
     makeTab("Home",1,"Home") makeTab("Farm",2,"Farm") makeTab("Attack",3,"Attack")
     makeTab("Raid",4,"Raid") makeTab("Misc",5,"Misc") makeTab("FPS",6,"FPS") makeTab("About",7,"About")
-    local sideFooter=mk("TextLabel",{Size=UDim2.new(1,-16,0,26),Position=UDim2.new(0,8,1,-38),BackgroundTransparency=1,Text="BDZ HUB  |  BLOX FRUITS",Font=F.mono,TextSize=8,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Center,ZIndex=3},sidebar)
     local function sec(par,txt,o)
         local w=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundTransparency=1,LayoutOrder=o},par)
-        mk("TextLabel",{Size=UDim2.new(1,0,0,16),BackgroundTransparency=1,Text=txt,Font=F.bold,TextSize=9,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left},w)
+        mk("TextLabel",{Size=UDim2.new(1,0,0,16),BackgroundTransparency=1,Text=txt,Font=F.bold,TextSize=10,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left},w)
         mk("Frame",{Size=UDim2.new(0,22,0,2),Position=UDim2.new(0,0,0,20),BackgroundColor3=T.accent,BorderSizePixel=0},w)
         return w
     end
@@ -1273,7 +1381,7 @@ do
         local row=mk("Frame",{Size=UDim2.new(1,-36,0,32),Position=UDim2.new(0,18,0,36),BackgroundColor3=T.bg3,BorderSizePixel=0,ZIndex=11},w)
         mk("UICorner",{CornerRadius=UDim.new(0,8)},row)
         mk("UIStroke",{Color=T.border2,Thickness=1,Transparency=0.4},row)
-        mk("TextLabel",{Size=UDim2.new(0,20,1,0),Position=UDim2.new(1,-24,0,0),BackgroundTransparency=1,Text="v",Font=F.bold,TextSize=12,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Center,ZIndex=12},row)
+        mk("TextLabel",{Size=UDim2.new(0,20,1,0),Position=UDim2.new(1,-24,0,0),BackgroundTransparency=1,Text="▾",Font=F.bold,TextSize=12,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Center,ZIndex=12},row)
         local cur={display=dN.display,value=dN.value}
         local lo=false
         local btn=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",ZIndex=12},row)
@@ -1284,7 +1392,7 @@ do
         btn.MouseButton1Click:Connect(function()
             if lo then closeL() return end
             closeL()
-            local list=mk("ScrollingFrame",{Name="BdzHubDropdown",Size=UDim2.new(0,row.AbsoluteSize.X,0,160),Position=UDim2.new(0,row.AbsolutePosition.X-sg.AbsolutePosition.X,0,row.AbsolutePosition.Y-sg.AbsolutePosition.Y+row.AbsoluteSize.Y+4),BackgroundColor3=T.bg1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=T.border3,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=500},sg)
+            local list=mk("ScrollingFrame",{Name="BDZHubDropdown",Size=UDim2.new(0,row.AbsoluteSize.X,0,160),Position=UDim2.new(0,row.AbsolutePosition.X-sg.AbsolutePosition.X,0,row.AbsolutePosition.Y-sg.AbsolutePosition.Y+row.AbsoluteSize.Y+4),BackgroundColor3=T.bg1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=T.border3,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=500},sg)
             mk("UICorner",{CornerRadius=UDim.new(0,8)},list)
             mk("UIStroke",{Color=T.border3,Thickness=1,Transparency=0.2},list)
             mk("UIListLayout",{Padding=UDim.new(0,2),SortOrder=Enum.SortOrder.LayoutOrder},list)
@@ -1404,10 +1512,10 @@ do
     local adS=sld(scAttack,"Attack Delay","Milliseconds between swings. 0 = every frame.",0,100,State.AttackDelay*1000," ms",function(v) State.AttackDelay=v/1000 end,2)
     local mhS=sld(scAttack,"Multi Hit","Hit events per swing.",1,5,State.AttackBurst," hits",function(v) State.AttackBurst=math.floor(v) end,3)
     sec(scAttack,"PRESETS",4)
-    act(scAttack,"Safe - 33/sec",function() adS.set(30) mhS.set(1) end,5,"default")
-    act(scAttack,"Normal - 60/sec",function() adS.set(16) mhS.set(1) end,6,"primary")
-    act(scAttack,"Fast - 120/sec",function() adS.set(16) mhS.set(2) end,7,"default")
-    act(scAttack,"Max - 300/sec",function() adS.set(0) mhS.set(5) end,8,"danger")
+    act(scAttack,"Safe — 33/sec",function() adS.set(30) mhS.set(1) end,5,"default")
+    act(scAttack,"Normal — 60/sec",function() adS.set(16) mhS.set(1) end,6,"primary")
+    act(scAttack,"Fast — 120/sec",function() adS.set(16) mhS.set(2) end,7,"default")
+    act(scAttack,"Max — 300/sec",function() adS.set(0) mhS.set(5) end,8,"danger")
 
     sec(scRaid,"MAIN MODE",1)
     local rT=tgl(scRaid,"Auto Raid","Buys chip, walks to summon, clicks button, clears islands.",State.AutoRaidMode,function(v) State.AutoRaidMode=v UI.Upd() end,2)
@@ -1486,27 +1594,13 @@ do
         for nn,p in pairs(pages) do p.root.Visible=(nn==n) end
         for nn,d in pairs(tabBtns) do
             local on=nn==n
-            d.btn:SetAttribute("BDZActive",on)
             d.ind.Visible=on
-            tw(d.btn,0.2,{BackgroundColor3=on and T.bg3 or T.bg2,BackgroundTransparency=on and 0.08 or 0.62})
+            tw(d.btn,0.2,{BackgroundColor3=on and T.bg3 or T.bg2,BackgroundTransparency=on and 0 or 0.5})
             tw(d.dot,0.2,{BackgroundColor3=on and T.accentHot or T.textFaint})
-            tw(d.icon,0.2,{TextColor3=on and T.accentHot or T.textFaint})
             tw(d.lbl,0.2,{TextColor3=on and T.text or T.textDim})
         end
     end
     for n,d in pairs(tabBtns) do d.btn.MouseButton1Click:Connect(function() setTab(n) end) end
-    task.spawn(function()
-        for _=1,40 do
-            if LogoAsset then
-                headerLogo.Image=LogoAsset
-                headerLogo.ImageTransparency=0
-                headerGlyph.Visible=false
-                logoGlow.BackgroundTransparency=0.97
-                break
-            end
-            task.wait(0.15)
-        end
-    end)
     setTab("Home")
 
     UI.Upd=function()
@@ -1564,63 +1658,11 @@ do
 
     local min=false
     local origS=UDim2.new(0,W,0,H)
-    local origHeaderS=UDim2.new(1,0,0,70)
-    local origLogoS=UDim2.new(0,48,0,48)
-    local compactLogoS=UDim2.new(0,54,0,54)
-    local compactHit=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Visible=false,ZIndex=20},main)
-    local function setMinimized(v)
-        min=v
-        if min then
-            body.Visible=false
-            topLine.Visible=false
-            glowTR.Visible=false
-            glowBL.Visible=false
-            pill.Visible=false
-            minBtn.Visible=false
-            closeBtn.Visible=false
-            seaLbl.Visible=false
-            for _,ch in ipairs(header:GetChildren()) do
-                if ch:IsA("Frame") and ch~=logoBox then ch.Visible=false end
-            end
-            main.Size=UDim2.new(0,64,0,64)
-            main.BackgroundTransparency=0.02
-            header.Size=UDim2.new(1,0,1,0)
-            header.BackgroundTransparency=1
-            logoBox.Size=compactLogoS
-            logoBox.Position=UDim2.new(0.5,-27,0.5,-27)
-            headerLogo.Size=UDim2.new(1,-10,1,-10)
-            headerLogo.Position=UDim2.new(0,5,0,5)
-            headerGlyph.TextSize=24
-            compactHit.Visible=true
-        else
-            compactHit.Visible=false
-            main.BackgroundTransparency=0
-            main.Size=origS
-            header.Size=origHeaderS
-            header.BackgroundTransparency=0.08
-            body.Visible=true
-            topLine.Visible=true
-            glowTR.Visible=true
-            glowBL.Visible=true
-            pill.Visible=true
-            minBtn.Visible=true
-            closeBtn.Visible=true
-            seaLbl.Visible=true
-            for _,ch in ipairs(header:GetChildren()) do
-                if ch:IsA("Frame") and ch~=logoBox then ch.Visible=true end
-            end
-            logoBox.Size=origLogoS
-            logoBox.Position=UDim2.new(0,18,0.5,-24)
-            headerLogo.Size=UDim2.new(1,-10,1,-10)
-            headerLogo.Position=UDim2.new(0,5,0,5)
-            headerGlyph.TextSize=22
-        end
-    end
     minBtn.MouseButton1Click:Connect(function()
-        setMinimized(true)
-    end)
-    compactHit.MouseButton1Click:Connect(function()
-        setMinimized(false)
+        min=not min
+        tw(main,0.3,{Size=min and UDim2.new(0,W,0,64) or origS},Enum.EasingStyle.Quint)
+        body.Visible=not min
+        minBtn.Text=min and "+" or "—"
     end)
     closeBtn.MouseButton1Click:Connect(function()
         State.Destroyed=true State.PanicMode=true StopMoving()
@@ -1629,13 +1671,12 @@ do
     end)
     minBtn.MouseEnter:Connect(function() tw(minBtn,0.15,{BackgroundColor3=T.bg4}) end)
     minBtn.MouseLeave:Connect(function() tw(minBtn,0.15,{BackgroundColor3=T.bg3}) end)
-    closeBtn.MouseEnter:Connect(function() tw(closeBtn,0.15,{BackgroundColor3=T.dangerDim,TextColor3=T.text}) end)
+    closeBtn.MouseEnter:Connect(function() tw(closeBtn,0.15,{BackgroundColor3=T.dangerDim}) end)
     closeBtn.MouseLeave:Connect(function() tw(closeBtn,0.15,{BackgroundColor3=T.bg3}) end)
 
     main.Size=UDim2.new(0,W,0,0) main.BackgroundTransparency=1 main.Visible=false
--- AUTH GATE ENABLED
     task.spawn(function()
-        while not loadingDone or not passed do task.wait(0.05) end
+        while not loadingDone do task.wait(0.05) end
         task.wait(0.15)
         main.Visible=true main.Size=UDim2.new(0,W,0,0)
         tw(main,0.55,{Size=origS,BackgroundTransparency=0},Enum.EasingStyle.Back,Enum.EasingDirection.Out)
@@ -1672,10 +1713,10 @@ task.spawn(function()
             if ns~=SeaIndex then
                 SeaIndex=ns
                 for _,fn in ipairs(SeaChanged) do pcall(fn,ns) end
-                print("[BDZ HUB] sea changed > "..ns)
+                print("[BDZ HUB] sea changed → "..ns)
             end
         end
     end
 end)
 
-print("[BDZ HUB] loaded - v1.0")
+print("[BDZ HUB] loaded — v7.0")
