@@ -1,25 +1,18 @@
 --// ============================================================
---//  BDZ HUB · KEY SYSTEM  (paste ở ĐẦU script, trước mọi code khác)
---//  Luồng: GET KEY -> vượt link -> NHẬN KEY -> dán key -> VERIFY
---//  API: Supabase Edge Function check-key (device bind + time check)
+--//  BDZ HUB · KEY SYSTEM
+--//  Verify: Supabase Edge Function check-key
+--//  Get key: https://aryaxynk.github.io/bdzteam/
 --// ============================================================
 
-local SERVER_URL   = "https://aryaxynk.github.io/" -- web get key
-local CHECK_URL    = "https://nklukqriopezsoalnghm.supabase.co/functions/v1/check-key"
-local SUPABASE_KEY = "sb_publishable_RUE5iV8GqoVCFxjVt5ZBpg_FlTC1v-0"
-local APP_VERSION  = "V1"
-local SAVE_FILE    = "BDZ_key.txt" -- lưu key để tự đăng nhập khi key còn hạn
+local CHECK_KEY_URL = "https://nklukqriopezsoalnghm.supabase.co/functions/v1/check-key"
+local SUPABASE_KEY  = "sb_publishable_RUE5iV8GqoVCFxjVt5ZBpg_FlTC1v-0"
+local APP_VERSION   = "V1"
+local GET_KEY_PAGE  = "https://aryaxynk.github.io/bdzteam/"
+local SAVE_FILE     = "BDZ_key.txt"
 
 local Players = game:GetService("Players")
 local Http    = game:GetService("HttpService")
 local LP      = Players.LocalPlayer
-
--- ---------------- helpers ----------------
-local function urlencode(s)
-    return (tostring(s):gsub("([^%w%-_%.~])", function(c)
-        return string.format("%%%02X", string.byte(c))
-    end))
-end
 
 local function notify(title, text, dur)
     pcall(function()
@@ -29,41 +22,45 @@ local function notify(title, text, dur)
     end)
 end
 
-local function httpGet(url)
-    local ok, body = pcall(function() return game:HttpGet(url) end)
-    if ok and body and body ~= "" then return body end
-    local req = request or http_request or (syn and syn.request)
-    if req then
-        local ok2, res = pcall(req, { Url = url, Method = "GET" })
-        if ok2 and res then
-            if type(res) == "table" and res.Body then return res.Body end
-            if type(res) == "string" and res ~= "" then return res end
-        end
-    end
-    return nil
+local function getRequest()
+    return (syn and syn.request)
+        or (http and http.request)
+        or http_request
+        or request
+        or (fluxus and fluxus.request)
+        or (http and http.Request)
 end
 
-local function httpPostJson(url, headers, payloadTable)
-    local body = Http:JSONEncode(payloadTable)
-    local req = request or http_request or (syn and syn.request)
-    if req then
-        local ok, res = pcall(req, {
-            Url = url,
-            Method = "POST",
-            Headers = headers,
-            Body = body,
-        })
-        if ok and res then
-            if type(res) == "table" and res.Body then return res.Body end
-            if type(res) == "string" and res ~= "" then return res end
-        end
+local function httpPostJson(url, payload)
+    local body = Http:JSONEncode(payload)
+    local req = getRequest()
+    if not req then
+        return nil, "Executor không hỗ trợ HTTP POST (cần request/http_request)."
     end
-    -- fallback: syn/http_request không có -> dùng Http:PostAsync nếu executor hỗ trợ
-    local ok2, res2 = pcall(function()
-        return Http:PostAsync(url, body, Enum.HttpContentType.ApplicationJson, false, headers)
-    end)
-    if ok2 and res2 then return res2 end
-    return nil
+    local ok, res = pcall(req, {
+        Url = url,
+        Method = "POST",
+        Headers = {
+            ["Content-Type"] = "application/json",
+            ["apikey"] = SUPABASE_KEY,
+            ["Authorization"] = "Bearer " .. SUPABASE_KEY,
+        },
+        Body = body,
+    })
+    if not ok or not res then
+        return nil, "Không kết nối được server."
+    end
+    local code = tonumber(res.StatusCode or res.Status or 0) or 0
+    local raw = res.Body or res.body or ""
+    if type(raw) ~= "string" then raw = tostring(raw or "") end
+    if code > 0 and (code < 200 or code >= 300) and raw == "" then
+        return nil, "HTTP " .. tostring(code)
+    end
+    local ok2, data = pcall(function() return Http:JSONDecode(raw) end)
+    if not ok2 or type(data) ~= "table" then
+        return nil, "Server trả về sai định dạng."
+    end
+    return data, nil, code
 end
 
 local function getHWID()
@@ -76,51 +73,37 @@ local function getHWID()
         r = tostring(r):gsub("%s+", "")
         if #r >= 3 then return r end
     end
-    return "UID_" .. tostring(LP and LP.UserId or 0)
+    -- fallback ổn định theo máy + user
+    local uid = tostring(LP and LP.UserId or 0)
+    local name = tostring(LP and LP.Name or "player")
+    return "RBX_" .. uid .. "_" .. name
 end
 local HWID = getHWID()
 
-local REASONS = {
-    expired    = "Key đã hết hạn.\nBấm GET KEY để lấy key mới.",
-    wrong_hwid = "Key này thuộc về máy khác.",
-    not_found  = "Key không đúng.\nKiểm tra lại key vừa copy.",
-    missing    = "Thiếu key.",
-    disabled   = "Key đã bị vô hiệu hoá.",
-}
-
--- ---------------- verify qua Supabase Edge Function ----------------
 local function verifyKey(key)
-    key = tostring(key or ""):gsub("%s+", ""):upper()
-    if key == "" then return false, "Chưa nhập key." end
-
-    local headers = {
-        ["Content-Type"] = "application/json",
-        ["apikey"]       = SUPABASE_KEY,
-    }
-    local payload = {
-        key         = key,
-        device_id   = HWID,
+    key = tostring(key or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if key == "" then
+        return false, "Chưa nhập key."
+    end
+    local data, err = httpPostJson(CHECK_KEY_URL, {
+        key = key,
+        device_id = HWID,
         app_version = APP_VERSION,
-    }
-
-    local raw = httpPostJson(CHECK_URL, headers, payload)
-    if not raw or raw == "" then
-        return false, "Không kết nối được server.\nThử lại sau ít giây."
+    })
+    if not data then
+        return false, err or "Không kết nối được server."
     end
-
-    local ok, data = pcall(function() return Http:JSONDecode(raw) end)
-    if not ok or type(data) ~= "table" then
-        return false, "Server trả về sai định dạng."
+    local okFlag = data.ok == true
+    local valid = data.key_valid == true
+    local msg = tostring(data.message or "")
+    if okFlag and valid then
+        local exp = data.expires_at
+        return true, exp or true, msg ~= "" and msg or "Key hợp lệ."
     end
-
-    if data.ok == true and data.key_valid == true then
-        return true, data.expiresAt
+    if msg == "" or msg == "nil" then
+        msg = "Key không hợp lệ."
     end
-    local reason = data.reason or data.message
-    if reason and REASONS[reason] then
-        return false, REASONS[reason]
-    end
-    return false, "Key không hợp lệ."
+    return false, msg
 end
 
 local function saveKey(key)
@@ -135,15 +118,20 @@ local function clearSavedKey()
     end)
 end
 
--- ---------------- tự đăng nhập nếu key cũ còn hạn ----------------
-local passed = false
-do
+local function loadSavedKey()
     local saved = nil
     pcall(function()
         if isfile and isfile(SAVE_FILE) and readfile then
             saved = tostring(readfile(SAVE_FILE) or ""):gsub("%s+", "")
         end
     end)
+    return saved
+end
+
+-- ---------------- tự đăng nhập nếu key cũ còn hạn ----------------
+local passed = false
+do
+    local saved = loadSavedKey()
     if saved and saved ~= "" then
         local ok = verifyKey(saved)
         if ok then
@@ -155,11 +143,11 @@ do
     end
 end
 
--- ---------------- UI nhập key (chỉ hiện khi chưa pass) ----------------
+-- ---------------- UI nhập key ----------------
 if not passed then
     local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
     pcall(function()
-        local old = parentGui:FindFirstChild("BDZHubKeySystem")
+        local old = parentGui:FindFirstChild("BdzHubKeySystem")
         if old then old:Destroy() end
     end)
 
@@ -173,7 +161,7 @@ if not passed then
     }
 
     local gui = Instance.new("ScreenGui")
-    gui.Name = "BDZHubKeySystem"
+    gui.Name = "BdzHubKeySystem"
     gui.ResetOnSpawn = false
     gui.IgnoreGuiInset = true
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -192,22 +180,6 @@ if not passed then
     local mc = Instance.new("UICorner"); mc.CornerRadius = UDim.new(0, 16); mc.Parent = main
     local ms = Instance.new("UIStroke"); ms.Color = T.accent; ms.Thickness = 1; ms.Transparency = 0.6; ms.Parent = main
 
-    local function label(txt, y, h, size, color, parent)
-        local l = Instance.new("TextLabel")
-        l.Size = UDim2.new(1, -48, 0, h)
-        l.Position = UDim2.new(0, 24, 0, y)
-        l.BackgroundTransparency = 1
-        l.Text = txt
-        l.Font = Enum.Font.GothamBold
-        l.TextSize = size
-        l.TextColor3 = color
-        l.TextXAlignment = Enum.TextXAlignment.Left
-        l.TextWrapped = true
-        l.Parent = parent or main
-        return l
-    end
-
-    -- logo + title
     local logo = Instance.new("Frame")
     logo.Size = UDim2.new(0, 46, 0, 46)
     logo.Position = UDim2.new(0, 24, 0, 20)
@@ -229,15 +201,14 @@ if not passed then
 
     local sub = Instance.new("TextLabel")
     sub.Size = UDim2.new(0, 280, 0, 16); sub.Position = UDim2.new(0, 82, 0, 48)
-    sub.BackgroundTransparency = 1; sub.Text = "KEY SYSTEM · MỖI MÁY 1 KEY"
+    sub.BackgroundTransparency = 1; sub.Text = "KEY SYSTEM · CHECK-KEY · SUPABASE"
     sub.Font = Enum.Font.Gotham; sub.TextSize = 10
     sub.TextColor3 = T.faint; sub.TextXAlignment = Enum.TextXAlignment.Left
     sub.Parent = main
 
-    -- status
     local status = Instance.new("TextLabel")
     status.Size = UDim2.new(1, -48, 0, 40); status.Position = UDim2.new(0, 24, 0, 78)
-    status.BackgroundTransparency = 1; status.Text = "Nhập key để sử dụng script."
+    status.BackgroundTransparency = 1; status.Text = "Nhập key từ web để sử dụng script."
     status.Font = Enum.Font.Gotham; status.TextSize = 12
     status.TextColor3 = T.dim; status.TextXAlignment = Enum.TextXAlignment.Left
     status.TextYAlignment = Enum.TextYAlignment.Top; status.TextWrapped = true
@@ -248,12 +219,17 @@ if not passed then
         status.TextColor3 = color or T.dim
     end
 
-    -- key input
-    label("YOUR KEY", 122, 14, 10, T.faint)
+    local lab = Instance.new("TextLabel")
+    lab.Size = UDim2.new(1, -48, 0, 14); lab.Position = UDim2.new(0, 24, 0, 122)
+    lab.BackgroundTransparency = 1; lab.Text = "YOUR KEY"
+    lab.Font = Enum.Font.GothamBold; lab.TextSize = 10
+    lab.TextColor3 = T.faint; lab.TextXAlignment = Enum.TextXAlignment.Left
+    lab.Parent = main
+
     local keyBox = Instance.new("TextBox")
     keyBox.Size = UDim2.new(1, -48, 0, 42); keyBox.Position = UDim2.new(0, 24, 0, 140)
     keyBox.BackgroundColor3 = T.bg2; keyBox.BorderSizePixel = 0
-    keyBox.PlaceholderText = "BDZ-XXXX-XXXX-XXXX"
+    keyBox.PlaceholderText = "Dán key từ web..."
     keyBox.PlaceholderColor3 = T.faint
     keyBox.Text = ""; keyBox.Font = Enum.Font.Code; keyBox.TextSize = 14
     keyBox.TextColor3 = T.hot; keyBox.ClearTextOnFocus = false
@@ -261,7 +237,7 @@ if not passed then
     local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(0, 10); kc.Parent = keyBox
     local ks = Instance.new("UIStroke"); ks.Color = T.accent; ks.Thickness = 1; ks.Transparency = 0.6; ks.Parent = keyBox
 
-    local function button(txt, y, color1, color2)
+    local function button(txt, y, color1)
         local b = Instance.new("TextButton")
         b.Size = UDim2.new(1, -48, 0, 44); b.Position = UDim2.new(0, 24, 0, y)
         b.BackgroundColor3 = color1; b.BorderSizePixel = 0
@@ -274,20 +250,19 @@ if not passed then
 
     local verifyBtn = button("✔  VERIFY KEY", 192, Color3.fromRGB(30, 110, 82))
 
-    -- divider
     local div = Instance.new("TextLabel")
     div.Size = UDim2.new(1, -48, 0, 16); div.Position = UDim2.new(0, 24, 0, 244)
     div.BackgroundTransparency = 1; div.Text = "— CHƯA CÓ KEY? —"
     div.Font = Enum.Font.GothamBold; div.TextSize = 10
     div.TextColor3 = T.faint; div.Parent = main
 
-    local getBtn = button("📋  GET KEY (COPY LINK)", 266, Color3.fromRGB(40, 88, 140))
+    local getBtn = button("📋  GET KEY (COPY LINK WEB)", 266, Color3.fromRGB(40, 88, 140))
 
-    -- link box (hiện link để copy tay nếu cần)
     local linkBox = Instance.new("TextBox")
     linkBox.Size = UDim2.new(1, -48, 0, 66); linkBox.Position = UDim2.new(0, 24, 0, 318)
     linkBox.BackgroundColor3 = T.bg1; linkBox.BorderSizePixel = 0
-    linkBox.Text = "Bấm GET KEY để lấy link vượt..."; linkBox.Font = Enum.Font.Code; linkBox.TextSize = 11
+    linkBox.Text = GET_KEY_PAGE
+    linkBox.Font = Enum.Font.Code; linkBox.TextSize = 11
     linkBox.TextColor3 = T.dim; linkBox.TextWrapped = true
     linkBox.TextXAlignment = Enum.TextXAlignment.Left; linkBox.TextYAlignment = Enum.TextYAlignment.Top
     linkBox.ClearTextOnFocus = false; linkBox.TextEditable = true
@@ -301,30 +276,24 @@ if not passed then
     local foot = Instance.new("TextLabel")
     foot.Size = UDim2.new(1, -48, 0, 60); foot.Position = UDim2.new(0, 24, 0, 392)
     foot.BackgroundTransparency = 1
-    foot.Text = "Mở link bằng trình duyệt → vượt link → bấm NHẬN KEY → dán key vào ô trên → VERIFY.\nKey gắn theo máy (device ID)."
+    foot.Text = "Mở link web → vượt link → nhận key → dán vào ô trên → VERIFY.\nKey gắn device; hết hạn theo cấu hình admin."
     foot.Font = Enum.Font.Gotham; foot.TextSize = 11
     foot.TextColor3 = T.faint; foot.TextXAlignment = Enum.TextXAlignment.Left
     foot.TextYAlignment = Enum.TextYAlignment.Top; foot.TextWrapped = true
     foot.Parent = main
 
-    -- ---------------- actions ----------------
     getBtn.MouseButton1Click:Connect(function()
-        setStatus("Đang mở web lấy key...", T.dim)
-        local link = SERVER_URL
-        linkBox.Text = link
+        linkBox.Text = GET_KEY_PAGE
         local copied = false
         pcall(function()
-            if setclipboard then setclipboard(link); copied = true end
+            if setclipboard then setclipboard(GET_KEY_PAGE); copied = true end
         end)
         if copied then
-            setStatus("✔ Đã COPY link! Mở trình duyệt, vượt link để lấy key.", T.ok)
-            notify("BDZ HUB", "Đã copy link vượt ✔")
+            setStatus("✔ Đã COPY link web nhận key. Mở trình duyệt để lấy key.", T.ok)
+            notify("BDZ HUB", "Đã copy link nhận key ✔")
         else
-            setStatus("✔ Link đã hiện ở ô bên dưới — copy tay rồi mở trình duyệt.", T.ok)
+            setStatus("✔ Link ở ô bên dưới — copy tay rồi mở trình duyệt.", T.ok)
         end
-        pcall(function()
-            if setclipboard then setclipboard(link) end
-        end)
     end)
 
     verifyBtn.MouseButton1Click:Connect(function()
@@ -332,12 +301,7 @@ if not passed then
         local ok, info = verifyKey(keyBox.Text)
         if ok then
             saveKey(keyBox.Text)
-            local left = ""
-            if type(info) == "number" then
-                local h = math.max(0, math.floor((info / 1000 - os.time()) / 3600))
-                left = " (còn ~" .. h .. "h)"
-            end
-            setStatus("✔ Key hợp lệ" .. left .. "! Đang mở script...", T.ok)
+            setStatus("✔ Key hợp lệ! Đang mở script...", T.ok)
             notify("BDZ HUB", "Key hợp lệ ✔")
             task.wait(0.8)
             gui:Destroy()
@@ -347,23 +311,21 @@ if not passed then
         end
     end)
 
-    -- chặn script chạy tiếp cho tới khi nhập key đúng
     while not passed do
         task.wait(0.2)
     end
 end
 
 --// ============================================================
---//  TỚI ĐÂY LÀ KEY ĐÃ HỢP LỆ — CODE SCRIPT CHÍNH Ở BÊN DƯỚI
+--//  KEY HỢP LỆ — MAIN SCRIPT BDZ HUB
 --// ============================================================
-
 
 --// ================= MAIN SCRIPT: BDZ HUB =================
 
 -- BLOX FRUITS · BDZ HUB · v7.0
 for _,g in ipairs((gethui and {gethui()} or {game:GetService("CoreGui")})) do
-    local o=g:FindFirstChild("BF_BDZHub"); if o then o:Destroy() end
-    local l=g:FindFirstChild("BDZHubLoading"); if l then l:Destroy() end
+    local o=g:FindFirstChild("BF_BdzHub"); if o then o:Destroy() end
+    local l=g:FindFirstChild("BdzHubLoading"); if l then l:Destroy() end
 end
 
 local S={Players=game:GetService("Players"),RunService=game:GetService("RunService"),
@@ -405,7 +367,7 @@ local function DisplayName(n) return MOB_DISPLAY[n] or n end
 local loadingDone=false
 do
     local lg=Instance.new("ScreenGui")
-    lg.Name="BDZHubLoading"; lg.ResetOnSpawn=false; lg.IgnoreGuiInset=true
+    lg.Name="BdzHubLoading"; lg.ResetOnSpawn=false; lg.IgnoreGuiInset=true
     lg.DisplayOrder=9999; lg.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; lg.Parent=parentGui
     local function mk(c,p)
         local o=Instance.new(c)
@@ -648,7 +610,7 @@ local MoveTo,TeleportTo,BringMobs,DoAttack,StopMoving
 do
     local Block=Instance.new("Part")
     Block.Size=Vector3.new(1,1,1); Block.Anchored=true; Block.CanCollide=false; Block.CanTouch=false
-    Block.Transparency=1; Block.Name="BDZHub_MoveBlock"; Block.Parent=S.WS
+    Block.Transparency=1; Block.Name="BdzHub_MoveBlock"; Block.Parent=S.WS
     local ShouldTween,TweenInst=false,nil
     StopMoving=function()
         ShouldTween=false
@@ -1201,7 +1163,7 @@ do
         return f
     end
     local sg=Instance.new("ScreenGui")
-    sg.Name="BF_BDZHub"; sg.ResetOnSpawn=false; sg.IgnoreGuiInset=true
+    sg.Name="BF_BdzHub"; sg.ResetOnSpawn=false; sg.IgnoreGuiInset=true
     sg.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; sg.Parent=parentGui
     local W,H=IS_MOBILE and 400 or 620, IS_MOBILE and 340 or 460
     local main=mk("Frame",{Size=UDim2.new(0,W,0,H),Position=UDim2.new(0.5,-W/2,0.5,-H/2),BackgroundColor3=T.bg0,BorderSizePixel=0,Active=true,ClipsDescendants=true},sg)
@@ -1392,7 +1354,7 @@ do
         btn.MouseButton1Click:Connect(function()
             if lo then closeL() return end
             closeL()
-            local list=mk("ScrollingFrame",{Name="BDZHubDropdown",Size=UDim2.new(0,row.AbsoluteSize.X,0,160),Position=UDim2.new(0,row.AbsolutePosition.X-sg.AbsolutePosition.X,0,row.AbsolutePosition.Y-sg.AbsolutePosition.Y+row.AbsoluteSize.Y+4),BackgroundColor3=T.bg1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=T.border3,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=500},sg)
+            local list=mk("ScrollingFrame",{Name="BdzHubDropdown",Size=UDim2.new(0,row.AbsoluteSize.X,0,160),Position=UDim2.new(0,row.AbsolutePosition.X-sg.AbsolutePosition.X,0,row.AbsolutePosition.Y-sg.AbsolutePosition.Y+row.AbsoluteSize.Y+4),BackgroundColor3=T.bg1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=T.border3,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=500},sg)
             mk("UICorner",{CornerRadius=UDim.new(0,8)},list)
             mk("UIStroke",{Color=T.border3,Thickness=1,Transparency=0.2},list)
             mk("UIListLayout",{Padding=UDim.new(0,2),SortOrder=Enum.SortOrder.LayoutOrder},list)
