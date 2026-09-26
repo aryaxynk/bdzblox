@@ -3,7 +3,7 @@ local passed = true
 do
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", {
-            Title = "SIKE HUB",
+            Title = "BDZ HUB",
             Text  = "Key system disabled — default key: " .. KEY_DEFAULT,
             Duration = 4,
         })
@@ -13,8 +13,8 @@ end
 
 -- BLOX FRUITS --
 for _,g in ipairs((gethui and {gethui()} or {game:GetService("CoreGui")})) do
-    local o=g:FindFirstChild("BF_SikeHub"); if o then o:Destroy() end
-    local l=g:FindFirstChild("SikeHubLoading"); if l then l:Destroy() end
+    local o=g:FindFirstChild("BF_BdzHub"); if o then o:Destroy() end
+    local l=g:FindFirstChild("BdzHubLoading"); if l then l:Destroy() end
 end
 
 local S={Players=game:GetService("Players"),RunService=game:GetService("RunService"),
@@ -56,7 +56,7 @@ local function DisplayName(n) return MOB_DISPLAY[n] or n end
 local loadingDone=false
 do
     local lg=Instance.new("ScreenGui")
-    lg.Name="SikeHubLoading"; lg.ResetOnSpawn=false; lg.IgnoreGuiInset=true
+    lg.Name="BdzHubLoading"; lg.ResetOnSpawn=false; lg.IgnoreGuiInset=true
     lg.DisplayOrder=9999; lg.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; lg.Parent=parentGui
     local function mk(c,p)
         local o=Instance.new(c)
