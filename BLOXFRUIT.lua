@@ -1,14 +1,193 @@
-local KEY_DEFAULT = "bdz"
-local passed = true 
-do
-    pcall(function()
-        game:GetService("StarterGui"):SetCore("SendNotification", {
-            Title = "BDZ HUB",
-            Text  = "Key system disabled - default key: " .. KEY_DEFAULT,
-            Duration = 4,
-        })
+--// ================= BDZ HUB AUTH =================
+local AUTH_URL="https://nklukqriopezsoalnghm.supabase.co/functions/v1/check-key"
+local AUTH_APP_VERSION="V1"
+local AUTH_FAIL_MESSAGE="Key không hợp lệ."
+local AUTH_ENV=(getgenv and getgenv()) or _G
+local SUPABASE_APIKEY=tostring(AUTH_ENV.BDZ_SUPABASE_APIKEY or "")
+local passed=false
+local AuthDeviceId=""
+local AuthIP=""
+
+local function Trim(s)
+    s=tostring(s or "")
+    return (s:gsub("^%s+",""):gsub("%s+$",""))
+end
+
+local function GetDeviceId()
+    local candidates={
+        function() if gethwid then return gethwid() end end,
+        function() if syn and syn.gethwid then return syn.gethwid() end end,
+        function() return game:GetService("RbxAnalyticsService"):GetClientId() end,
+    }
+    for _,fn in ipairs(candidates) do
+        local ok,v=pcall(fn)
+        v=Trim(v)
+        if ok and v~="" then return v end
+    end
+    local file="bdz_hub_device_id.txt"
+    if isfile and readfile then
+        local ok,v=pcall(function() return readfile(file) end)
+        v=Trim(v)
+        if ok and v~="" then return v end
+    end
+    local id=string.format("BDZ-%d-%d-%d",os.time(),math.random(100000,999999),math.random(100000,999999))
+    if writefile then pcall(function() writefile(file,id) end) end
+    return id
+end
+
+local function GetPublicIP()
+    for _,url in ipairs({"https://api.ipify.org","https://checkip.amazonaws.com"}) do
+        local ok,v=pcall(function() return game:HttpGet(url) end)
+        v=Trim(v)
+        if ok and v~="" and #v<=64 then return v end
+    end
+    return ""
+end
+
+local function ResolveRequest()
+    if request then return request end
+    if http_request then return http_request end
+    if syn and syn.request then return syn.request end
+    if http and http.request then return http.request end
+    return nil
+end
+
+local function PostJSON(url,headers,payload)
+    local body=S.HTTP:JSONEncode(payload)
+    local req=ResolveRequest()
+    if req then
+        local ok,res=pcall(function()
+            return req({Url=url,Method="POST",Headers=headers,Body=body})
+        end)
+        if ok and type(res)=="table" then
+            local code=tonumber(res.StatusCode or res.Status or 0) or 0
+            local rb=res.Body or res.body or ""
+            if code==0 or (code>=200 and code<300) then return true,rb end
+            return false,rb
+        end
+    end
+    local ok,res=pcall(function()
+        return S.HTTP:RequestAsync({Url=url,Method="POST",Headers=headers,Body=body})
+    end)
+    if ok and type(res)=="table" and res.Success then return true,res.Body or "" end
+    return false,nil
+end
+
+local function CheckKey(inputKey)
+    local key=Trim(inputKey)
+    if key=="" then return false end
+    if AuthDeviceId=="" then AuthDeviceId=GetDeviceId() end
+    if AuthIP=="" then AuthIP=GetPublicIP() end
+    local ok,raw=PostJSON(AUTH_URL,{["Content-Type"]="application/json",apikey=SUPABASE_APIKEY},{
+        key=key,
+        device_id=AuthDeviceId,
+        app_version=AUTH_APP_VERSION,
+        ip=AuthIP,
+    })
+    if not ok or type(raw)~="string" or raw=="" then return false end
+    local decodedOk,data=pcall(function() return S.HTTP:JSONDecode(raw) end)
+    return decodedOk and type(data)=="table" and data.ok==true and data.key_valid==true
+end
+
+AuthDeviceId=GetDeviceId()
+task.spawn(function() AuthIP=GetPublicIP() end)
+
+local function ShowAuth()
+    local auth=Instance.new("ScreenGui")
+    auth.Name="BdzHubAuth"
+    auth.ResetOnSpawn=false
+    auth.IgnoreGuiInset=true
+    auth.DisplayOrder=10001
+    auth.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+    auth.Parent=parentGui
+
+    local function mk(c,p,par)
+        local o=Instance.new(c)
+        for k,v in pairs(p) do pcall(function() o[k]=v end) end
+        o.Parent=par or auth
+        return o
+    end
+
+    local bg=mk("Frame",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.fromRGB(4,6,10),BackgroundTransparency=0.18,BorderSizePixel=0})
+    local card=mk("Frame",{Size=UDim2.new(0,400,0,330),Position=UDim2.new(0.5,-200,0.5,-165),BackgroundColor3=Color3.fromRGB(10,14,22),BorderSizePixel=0,Active=true},bg)
+    mk("UICorner",{CornerRadius=UDim.new(0,18)},card)
+    mk("UIStroke",{Color=Color3.fromRGB(40,88,140),Thickness=1,Transparency=0.2},card)
+    local glow=mk("Frame",{Size=UDim2.new(0,220,0,220),Position=UDim2.new(1,-110,0,-110),BackgroundColor3=Color3.fromRGB(88,196,255),BackgroundTransparency=0.94,BorderSizePixel=0},card)
+    mk("UICorner",{CornerRadius=UDim.new(1,0)},glow)
+
+    local logoWrap=mk("Frame",{Size=UDim2.new(0,78,0,78),Position=UDim2.new(0.5,-39,0,28),BackgroundColor3=Color3.fromRGB(18,22,32),BorderSizePixel=0},card)
+    mk("UICorner",{CornerRadius=UDim.new(0,20)},logoWrap)
+    mk("UIStroke",{Color=Color3.fromRGB(40,88,140),Thickness=1},logoWrap)
+    local logo=mk("ImageLabel",{Size=UDim2.new(1,-12,1,-12),Position=UDim2.new(0,6,0,6),BackgroundTransparency=1,Image=LogoAsset or "",ScaleType=Enum.ScaleType.Fit,ResampleMode=Enum.ResamplerMode.Default},logoWrap)
+    local glyph=mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="B",Font=Enum.Font.GothamBlack,TextSize=36,TextColor3=Color3.fromRGB(120,220,255),Visible=not LogoAsset},logoWrap)
+
+    local title=mk("TextLabel",{Size=UDim2.new(1,-40,0,28),Position=UDim2.new(0,20,0,122),BackgroundTransparency=1,Text="BDZ HUB",Font=Enum.Font.GothamBlack,TextSize=22,TextColor3=Color3.fromRGB(242,245,252),TextXAlignment=Enum.TextXAlignment.Center},card)
+    local sub=mk("TextLabel",{Size=UDim2.new(1,-60,0,20),Position=UDim2.new(0,30,0,151),BackgroundTransparency=1,Text="Enter your access key to continue",Font=Enum.Font.Gotham,TextSize=11,TextColor3=Color3.fromRGB(148,158,180),TextXAlignment=Enum.TextXAlignment.Center},card)
+
+    local input=mk("TextBox",{Size=UDim2.new(1,-44,0,48),Position=UDim2.new(0,22,0,188),BackgroundColor3=Color3.fromRGB(18,22,32),BorderSizePixel=0,ClearTextOnFocus=false,PlaceholderText="ENTER KEY",PlaceholderColor3=Color3.fromRGB(80,90,112),Text="",TextColor3=Color3.fromRGB(242,245,252),TextSize=13,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left},card)
+    mk("UICorner",{CornerRadius=UDim.new(0,12)},input)
+    mk("UIStroke",{Color=Color3.fromRGB(48,56,74),Thickness=1,Transparency=0.2},input)
+    mk("UIPadding",{PaddingLeft=UDim.new(0,14),PaddingRight=UDim.new(0,14)},input)
+
+    local verify=mk("TextButton",{Size=UDim2.new(1,-44,0,44),Position=UDim2.new(0,22,0,245),BackgroundColor3=Color3.fromRGB(40,88,140),BorderSizePixel=0,Text="VERIFY KEY",Font=Enum.Font.GothamBold,TextSize=12,TextColor3=Color3.fromRGB(242,245,252),AutoButtonColor=false},card)
+    mk("UICorner",{CornerRadius=UDim.new(0,12)},verify)
+    local status=mk("TextLabel",{Size=UDim2.new(1,-40,0,22),Position=UDim2.new(0,20,1,-28),BackgroundTransparency=1,Text="Enter a key to continue.",Font=Enum.Font.Gotham,TextSize=10,TextColor3=Color3.fromRGB(80,90,112),TextXAlignment=Enum.TextXAlignment.Center},card)
+
+    local busy=false
+    local function setStatus(txt,good)
+        status.Text=txt
+        status.TextColor3=good and Color3.fromRGB(72,235,168) or Color3.fromRGB(148,158,180)
+    end
+    local function verifyKey()
+        if busy then return end
+        local key=Trim(input.Text)
+        if key=="" then setStatus(AUTH_FAIL_MESSAGE,false) return end
+        busy=true
+        verify.Text="CHECKING..."
+        verify.BackgroundColor3=Color3.fromRGB(30,60,92)
+        setStatus("Checking key...",false)
+        task.spawn(function()
+            local good=CheckKey(key)
+            if good then
+                passed=true
+                setStatus("Key verified.",true)
+                task.wait(0.2)
+                auth:Destroy()
+            else
+                passed=false
+                setStatus(AUTH_FAIL_MESSAGE,false)
+                verify.Text="VERIFY KEY"
+                verify.BackgroundColor3=Color3.fromRGB(40,88,140)
+                input:CaptureFocus()
+            end
+            busy=false
+        end)
+    end
+
+    verify.MouseButton1Click:Connect(verifyKey)
+    input.FocusLost:Connect(function(enterPressed) if enterPressed then verifyKey() end end)
+    verify.MouseEnter:Connect(function() if not busy then verify.BackgroundColor3=Color3.fromRGB(52,108,166) end end)
+    verify.MouseLeave:Connect(function() if not busy then verify.BackgroundColor3=Color3.fromRGB(40,88,140) end end)
+
+    task.spawn(function()
+        while auth.Parent and not passed do
+            if LogoAsset then
+                logo.Image=LogoAsset
+                glyph.Visible=false
+            end
+            task.wait(0.15)
+        end
+    end)
+    task.spawn(function()
+        bg.BackgroundTransparency=1
+        card.Size=UDim2.new(0,400,0,0)
+        S.Tween:Create(bg,TweenInfo.new(0.3),{BackgroundTransparency=0.18}):Play()
+        S.Tween:Create(card,TweenInfo.new(0.45,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Size=UDim2.new(0,400,0,330)}):Play()
     end)
 end
+
+ShowAuth()
+
 --// ================= MAIN SCRIPT =================
 
 -- BLOX FRUITS --
@@ -1452,7 +1631,7 @@ do
 
     main.Size=UDim2.new(0,W,0,0) main.BackgroundTransparency=1 main.Visible=false
     task.spawn(function()
-        while not loadingDone do task.wait(0.05) end
+        while not loadingDone or not passed do task.wait(0.05) end
         task.wait(0.15)
         main.Visible=true main.Size=UDim2.new(0,W,0,0)
         tw(main,0.55,{Size=origS,BackgroundTransparency=0},Enum.EasingStyle.Back,Enum.EasingDirection.Out)
