@@ -1,10 +1,5 @@
---// ============================================================
---//  SIKE HUB · KEY SYSTEM — ĐÃ BỎ
---//  Key mặc định: "bdz" (không kiểm tra, luôn pass)
---// ============================================================
-
 local KEY_DEFAULT = "bdz"
-local passed = true   -- luôn true, không gọi server, không lưu file
+local passed = true 
 do
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", {
@@ -14,15 +9,9 @@ do
         })
     end)
 end
+--// ================= MAIN SCRIPT =================
 
---// ============================================================
---//  TỚI ĐÂY LÀ KEY ĐÃ HỢP LỆ — CODE SCRIPT CHÍNH Ở BÊN DƯỚI
---// ============================================================
-
-
---// ================= MAIN SCRIPT: SIKE HUB =================
-
--- BLOX FRUITS · SIKE HUB · v7.0
+-- BLOX FRUITS --
 for _,g in ipairs((gethui and {gethui()} or {game:GetService("CoreGui")})) do
     local o=g:FindFirstChild("BF_SikeHub"); if o then o:Destroy() end
     local l=g:FindFirstChild("SikeHubLoading"); if l then l:Destroy() end
@@ -161,7 +150,7 @@ do
         task.wait(0.5)
         lg:Destroy()
         loadingDone=true
-        print("[SIKE HUB] loading complete")
+        print("[BDZ HUB] loading complete")
     end)
 end
 
@@ -310,7 +299,7 @@ local MoveTo,TeleportTo,BringMobs,DoAttack,StopMoving
 do
     local Block=Instance.new("Part")
     Block.Size=Vector3.new(1,1,1); Block.Anchored=true; Block.CanCollide=false; Block.CanTouch=false
-    Block.Transparency=1; Block.Name="SikeHub_MoveBlock"; Block.Parent=S.WS
+    Block.Transparency=1; Block.Name="BdzHub_MoveBlock"; Block.Parent=S.WS
     local ShouldTween,TweenInst=false,nil
     StopMoving=function()
         ShouldTween=false
@@ -863,7 +852,7 @@ do
         return f
     end
     local sg=Instance.new("ScreenGui")
-    sg.Name="BF_SikeHub"; sg.ResetOnSpawn=false; sg.IgnoreGuiInset=true
+    sg.Name="BF_BdzHub"; sg.ResetOnSpawn=false; sg.IgnoreGuiInset=true
     sg.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; sg.Parent=parentGui
     local W,H=IS_MOBILE and 400 or 620, IS_MOBILE and 340 or 460
     local main=mk("Frame",{Size=UDim2.new(0,W,0,H),Position=UDim2.new(0.5,-W/2,0.5,-H/2),BackgroundColor3=T.bg0,BorderSizePixel=0,Active=true,ClipsDescendants=true},sg)
@@ -885,8 +874,8 @@ do
     local inner=mk("Frame",{Size=UDim2.new(0,26,0,26),Position=UDim2.new(0.5,-13,0.5,-13),BackgroundColor3=T.accent,BackgroundTransparency=0.86,BorderSizePixel=0,ZIndex=5,Parent=logoBox},nil)
     mk("UICorner",{CornerRadius=UDim.new(1,0)},inner)
     mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="S",Font=F.black,TextSize=22,TextColor3=T.accentHot,ZIndex=6},logoBox)
-    mk("TextLabel",{Size=UDim2.new(0,260,0,20),Position=UDim2.new(0,72,0,12),BackgroundTransparency=1,Text="SIKE HUB",Font=F.black,TextSize=17,TextColor3=T.text,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
-    local seaLbl=mk("TextLabel",{Size=UDim2.new(0,260,0,15),Position=UDim2.new(0,72,0,34),BackgroundTransparency=1,Text="v7.0  ·  sea "..SeaIndex,Font=F.reg,TextSize=11,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
+    mk("TextLabel",{Size=UDim2.new(0,260,0,20),Position=UDim2.new(0,72,0,12),BackgroundTransparency=1,Text="BDZ HUB",Font=F.black,TextSize=17,TextColor3=T.text,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
+    local seaLbl=mk("TextLabel",{Size=UDim2.new(0,260,0,15),Position=UDim2.new(0,72,0,34),BackgroundTransparency=1,Text="v1.0  ·  sea "..SeaIndex,Font=F.reg,TextSize=11,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
     local pill=mk("Frame",{Size=UDim2.new(0,108,0,28),Position=UDim2.new(1,-186,0.5,-14),BackgroundColor3=T.bg2,BorderSizePixel=0,ZIndex=4},header)
     mk("UICorner",{CornerRadius=UDim.new(1,0)},pill)
     local pillStroke=mk("UIStroke",{Color=T.border2,Thickness=1,Transparency=0.4},pill)
@@ -1054,7 +1043,7 @@ do
         btn.MouseButton1Click:Connect(function()
             if lo then closeL() return end
             closeL()
-            local list=mk("ScrollingFrame",{Name="SikeHubDropdown",Size=UDim2.new(0,row.AbsoluteSize.X,0,160),Position=UDim2.new(0,row.AbsolutePosition.X-sg.AbsolutePosition.X,0,row.AbsolutePosition.Y-sg.AbsolutePosition.Y+row.AbsoluteSize.Y+4),BackgroundColor3=T.bg1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=T.border3,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=500},sg)
+            local list=mk("ScrollingFrame",{Name="BdzHubDropdown",Size=UDim2.new(0,row.AbsoluteSize.X,0,160),Position=UDim2.new(0,row.AbsolutePosition.X-sg.AbsolutePosition.X,0,row.AbsolutePosition.Y-sg.AbsolutePosition.Y+row.AbsoluteSize.Y+4),BackgroundColor3=T.bg1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=T.border3,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=500},sg)
             mk("UICorner",{CornerRadius=UDim.new(0,8)},list)
             mk("UIStroke",{Color=T.border3,Thickness=1,Transparency=0.2},list)
             mk("UIListLayout",{Padding=UDim.new(0,2),SortOrder=Enum.SortOrder.LayoutOrder},list)
@@ -1329,7 +1318,7 @@ do
     closeBtn.MouseButton1Click:Connect(function()
         State.Destroyed=true State.PanicMode=true StopMoving()
         if sg then sg:Destroy() end
-        print("[SIKE HUB] unloaded")
+        print("[BDZ HUB] unloaded")
     end)
     minBtn.MouseEnter:Connect(function() tw(minBtn,0.15,{BackgroundColor3=T.bg4}) end)
     minBtn.MouseLeave:Connect(function() tw(minBtn,0.15,{BackgroundColor3=T.bg3}) end)
@@ -1375,10 +1364,10 @@ task.spawn(function()
             if ns~=SeaIndex then
                 SeaIndex=ns
                 for _,fn in ipairs(SeaChanged) do pcall(fn,ns) end
-                print("[SIKE HUB] sea changed → "..ns)
+                print("[BDZ HUB] sea changed → "..ns)
             end
         end
     end
 end)
 
-print("[SIKE HUB] loaded — v7.0")
+print("[BDZ HUB] loaded — v1.0")
