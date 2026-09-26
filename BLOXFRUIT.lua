@@ -53,6 +53,30 @@ for s,ids in pairs(SEAP) do if ids[PlaceId] then SeaIndex=s break end end
 local MOB_DISPLAY={["God's Guard"]="Sky Guards"}
 local function DisplayName(n) return MOB_DISPLAY[n] or n end
 
+local LOGO_URL="https://263.org.vn/logo"
+local LogoAsset=nil
+local function DetectLogoExt(data)
+    if type(data)~="string" then return ".png" end
+    if data:sub(1,8)=="\137PNG\r\n\026\n" then return ".png" end
+    if data:sub(1,3)=="\255\216\255" then return ".jpg" end
+    if data:sub(1,4)=="GIF8" then return ".gif" end
+    if data:sub(1,4)=="RIFF" and data:sub(9,12)=="WEBP" then return ".webp" end
+    return ".png"
+end
+local function LoadRemoteLogo()
+    if not writefile then return nil end
+    local assetLoader=getcustomasset or getsynasset
+    if not assetLoader then return nil end
+    local ok,data=pcall(function() return game:HttpGet(LOGO_URL) end)
+    if not ok or type(data)~="string" or #data<32 then return nil end
+    local path="bdz_hub_logo"..DetectLogoExt(data)
+    pcall(function() writefile(path,data) end)
+    local okAsset,asset=pcall(function() return assetLoader(path) end)
+    if okAsset and asset then return asset end
+    return nil
+end
+task.spawn(function() LogoAsset=LoadRemoteLogo() end)
+
 local loadingDone=false
 do
     local lg=Instance.new("ScreenGui")
@@ -94,11 +118,12 @@ do
             task.wait(1.2)
         end
     end)
-    local card=mk("Frame",{Size=UDim2.new(0,70,0,70),Position=UDim2.new(0.5,-35,0.5,-35),BackgroundColor3=Color3.fromRGB(10,14,22),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=10,Parent=orbit})
-    mk("UICorner",{CornerRadius=UDim.new(0,20)},card)
+    local card=mk("Frame",{Size=UDim2.new(0,82,0,82),Position=UDim2.new(0.5,-41,0.5,-41),BackgroundColor3=Color3.fromRGB(10,14,22),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=10,Parent=orbit})
+    mk("UICorner",{CornerRadius=UDim.new(0,22)},card)
     local cs=mk("UIStroke",{Color=Color3.fromRGB(88,196,255),Thickness=1.5,Transparency=1},card)
-    local glyph=mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="S",Font=Enum.Font.GothamBlack,TextSize=40,TextColor3=Color3.fromRGB(160,220,255),TextTransparency=1,ZIndex=11,Parent=card})
-    local title=mk("TextLabel",{Size=UDim2.new(1,0,0,40),Position=UDim2.new(0,0,0,250),BackgroundTransparency=1,Text="S I K E  H U B",Font=Enum.Font.GothamBlack,TextSize=28,TextColor3=Color3.fromRGB(242,245,252),TextTransparency=1,ZIndex=7,Parent=stage})
+    local logoImg=mk("ImageLabel",{Size=UDim2.new(1,-12,1,-12),Position=UDim2.new(0,6,0,6),BackgroundTransparency=1,Image=LogoAsset or "",ImageTransparency=1,ScaleType=Enum.ScaleType.Fit,ZIndex=11,Parent=card})
+    local glyph=mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="B",Font=Enum.Font.GothamBlack,TextSize=40,TextColor3=Color3.fromRGB(160,220,255),TextTransparency=1,ZIndex=10,Parent=card})
+    local title=mk("TextLabel",{Size=UDim2.new(1,0,0,40),Position=UDim2.new(0,0,0,250),BackgroundTransparency=1,Text="B D Z  H U B",Font=Enum.Font.GothamBlack,TextSize=28,TextColor3=Color3.fromRGB(242,245,252),TextTransparency=1,ZIndex=7,Parent=stage})
     local sub=mk("TextLabel",{Size=UDim2.new(1,0,0,18),Position=UDim2.new(0,0,0,292),BackgroundTransparency=1,Text="INITIALIZING",Font=Enum.Font.GothamBold,TextSize=11,TextColor3=Color3.fromRGB(140,158,190),TextTransparency=1,ZIndex=7,Parent=stage})
     local trk=mk("Frame",{Size=UDim2.new(0,360,0,3),Position=UDim2.new(0.5,-180,0,330),BackgroundColor3=Color3.fromRGB(24,30,44),BackgroundTransparency=1,BorderSizePixel=0,ZIndex=7,Parent=stage})
     mk("UICorner",{CornerRadius=UDim.new(1,0)},trk)
@@ -117,7 +142,24 @@ do
         S.Tween:Create(card,TweenInfo.new(0.5),{BackgroundTransparency=0}):Play()
         S.Tween:Create(cs,TweenInfo.new(0.5),{Transparency=0.3}):Play()
         task.wait(0.1)
-        S.Tween:Create(glyph,TweenInfo.new(0.5),{TextTransparency=0}):Play()
+        if LogoAsset then
+            logoImg.Image=LogoAsset
+            S.Tween:Create(logoImg,TweenInfo.new(0.5),{ImageTransparency=0}):Play()
+            glyph.TextTransparency=1
+        else
+            S.Tween:Create(glyph,TweenInfo.new(0.5),{TextTransparency=0}):Play()
+            task.spawn(function()
+                for _=1,30 do
+                    task.wait(0.15)
+                    if LogoAsset then
+                        logoImg.Image=LogoAsset
+                        S.Tween:Create(logoImg,TweenInfo.new(0.35),{ImageTransparency=0}):Play()
+                        S.Tween:Create(glyph,TweenInfo.new(0.25),{TextTransparency=1}):Play()
+                        break
+                    end
+                end
+            end)
+        end
         task.wait(0.25)
         S.Tween:Create(title,TweenInfo.new(0.5),{TextTransparency=0}):Play()
         task.wait(0.15)
@@ -138,6 +180,7 @@ do
         S.Tween:Create(back,TweenInfo.new(0.5),{BackgroundTransparency=1}):Play()
         for _,r in ipairs(rings) do pcall(function() S.Tween:Create(r.s,TweenInfo.new(0.4),{Transparency=1}):Play() end) end
         S.Tween:Create(glyph,TweenInfo.new(0.4),{TextTransparency=1}):Play()
+        S.Tween:Create(logoImg,TweenInfo.new(0.4),{ImageTransparency=1}):Play()
         S.Tween:Create(card,TweenInfo.new(0.4),{BackgroundTransparency=1}):Play()
         S.Tween:Create(cs,TweenInfo.new(0.4),{Transparency=1}):Play()
         S.Tween:Create(title,TweenInfo.new(0.4),{TextTransparency=1}):Play()
@@ -854,7 +897,7 @@ do
     local sg=Instance.new("ScreenGui")
     sg.Name="BF_BdzHub"; sg.ResetOnSpawn=false; sg.IgnoreGuiInset=true
     sg.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; sg.Parent=parentGui
-    local W,H=IS_MOBILE and 400 or 620, IS_MOBILE and 340 or 460
+    local W,H=IS_MOBILE and 400 or 640, IS_MOBILE and 340 or 470
     local main=mk("Frame",{Size=UDim2.new(0,W,0,H),Position=UDim2.new(0.5,-W/2,0.5,-H/2),BackgroundColor3=T.bg0,BorderSizePixel=0,Active=true,ClipsDescendants=true},sg)
     mk("UICorner",{CornerRadius=UDim.new(0,18)},main)
     mk("UIStroke",{Color=T.accentDim,Thickness=1,Transparency=0.55,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},main)
@@ -865,46 +908,57 @@ do
     mk("UICorner",{CornerRadius=UDim.new(1,0)},glowBL)
     local topLine=mk("Frame",{Size=UDim2.new(1,-36,0,1),Position=UDim2.new(0,18,0,0),BackgroundColor3=T.accent,BorderSizePixel=0,ZIndex=10},main)
     mk("UIGradient",{Color=ColorSequence.new({ColorSequenceKeypoint.new(0,T.bg0),ColorSequenceKeypoint.new(0.25,T.accent),ColorSequenceKeypoint.new(0.5,T.violet),ColorSequenceKeypoint.new(0.75,T.accent),ColorSequenceKeypoint.new(1,T.bg0)})},topLine)
-    local header=mk("Frame",{Size=UDim2.new(1,0,0,64),BackgroundColor3=T.bg1,BackgroundTransparency=0.15,BorderSizePixel=0,ZIndex=2},main)
+    local header=mk("Frame",{Size=UDim2.new(1,0,0,70),BackgroundColor3=T.bg1,BackgroundTransparency=0.08,BorderSizePixel=0,ZIndex=2},main)
     mk("UICorner",{CornerRadius=UDim.new(0,18)},header)
-    mk("Frame",{Size=UDim2.new(1,0,0.5,0),Position=UDim2.new(0,0,0.5,0),BackgroundColor3=T.bg1,BackgroundTransparency=0.15,BorderSizePixel=0,ZIndex=2},header)
-    local logoBox=mk("Frame",{Size=UDim2.new(0,40,0,40),Position=UDim2.new(0,18,0.5,-20),BackgroundColor3=T.bg3,BorderSizePixel=0,ZIndex=4},header)
-    mk("UICorner",{CornerRadius=UDim.new(0,12)},logoBox)
-    mk("UIStroke",{Color=T.accentDim,Thickness=1,Transparency=0.3},logoBox)
-    local inner=mk("Frame",{Size=UDim2.new(0,26,0,26),Position=UDim2.new(0.5,-13,0.5,-13),BackgroundColor3=T.accent,BackgroundTransparency=0.86,BorderSizePixel=0,ZIndex=5,Parent=logoBox},nil)
-    mk("UICorner",{CornerRadius=UDim.new(1,0)},inner)
-    mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="S",Font=F.black,TextSize=22,TextColor3=T.accentHot,ZIndex=6},logoBox)
-    mk("TextLabel",{Size=UDim2.new(0,260,0,20),Position=UDim2.new(0,72,0,12),BackgroundTransparency=1,Text="BDZ HUB",Font=F.black,TextSize=17,TextColor3=T.text,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
-    local seaLbl=mk("TextLabel",{Size=UDim2.new(0,260,0,15),Position=UDim2.new(0,72,0,34),BackgroundTransparency=1,Text="v1.0  ·  sea "..SeaIndex,Font=F.reg,TextSize=11,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
-    local pill=mk("Frame",{Size=UDim2.new(0,108,0,28),Position=UDim2.new(1,-186,0.5,-14),BackgroundColor3=T.bg2,BorderSizePixel=0,ZIndex=4},header)
+    mk("Frame",{Size=UDim2.new(1,0,0.55,0),Position=UDim2.new(0,0,0.45,0),BackgroundColor3=T.bg1,BackgroundTransparency=0.08,BorderSizePixel=0,ZIndex=2},header)
+    mk("UIGradient",{Color=ColorSequence.new({ColorSequenceKeypoint.new(0,T.bg1),ColorSequenceKeypoint.new(0.55,T.bg2),ColorSequenceKeypoint.new(1,T.bg1)}),Rotation=0},header)
+    local logoBox=mk("Frame",{Size=UDim2.new(0,46,0,46),Position=UDim2.new(0,18,0.5,-23),BackgroundColor3=T.bg3,BorderSizePixel=0,ZIndex=4},header)
+    mk("UICorner",{CornerRadius=UDim.new(0,14)},logoBox)
+    mk("UIStroke",{Color=T.accentDim,Thickness=1,Transparency=0.15},logoBox)
+    local logoGlow=mk("Frame",{Size=UDim2.new(0,34,0,34),Position=UDim2.new(0.5,-17,0.5,-17),BackgroundColor3=T.accent,BackgroundTransparency=0.88,BorderSizePixel=0,ZIndex=5,Parent=logoBox},nil)
+    mk("UICorner",{CornerRadius=UDim.new(1,0)},logoGlow)
+    local headerLogo=mk("ImageLabel",{Size=UDim2.new(1,-8,1,-8),Position=UDim2.new(0,4,0,4),BackgroundTransparency=1,Image=LogoAsset or "",ScaleType=Enum.ScaleType.Fit,ZIndex=7,Parent=logoBox})
+    local headerGlyph=mk("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="B",Font=F.black,TextSize=22,TextColor3=T.accentHot,ZIndex=6},logoBox)
+    mk("TextLabel",{Size=UDim2.new(0,260,0,20),Position=UDim2.new(0,80,0,13),BackgroundTransparency=1,Text="BDZ HUB",Font=F.black,TextSize=17,TextColor3=T.text,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
+    local seaLbl=mk("TextLabel",{Size=UDim2.new(0,260,0,15),Position=UDim2.new(0,80,0,38),BackgroundTransparency=1,Text="v1.0  ·  sea "..SeaIndex,Font=F.reg,TextSize=11,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=4},header)
+    local pill=mk("Frame",{Size=UDim2.new(0,108,0,28),Position=UDim2.new(1,-194,0.5,-14),BackgroundColor3=T.bg2,BorderSizePixel=0,ZIndex=4},header)
     mk("UICorner",{CornerRadius=UDim.new(1,0)},pill)
     local pillStroke=mk("UIStroke",{Color=T.border2,Thickness=1,Transparency=0.4},pill)
     local pillDot=mk("Frame",{Size=UDim2.new(0,8,0,8),Position=UDim2.new(0,14,0.5,-4),BackgroundColor3=T.textFaint,BorderSizePixel=0,ZIndex=5},pill)
     mk("UICorner",{CornerRadius=UDim.new(1,0)},pillDot)
     local pillText=mk("TextLabel",{Size=UDim2.new(1,-30,1,0),Position=UDim2.new(0,28,0,0),BackgroundTransparency=1,Text="IDLE",Font=F.bold,TextSize=11,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=5},pill)
-    local minBtn=mk("TextButton",{Size=UDim2.new(0,32,0,32),Position=UDim2.new(1,-76,0.5,-16),BackgroundColor3=T.bg3,BorderSizePixel=0,Text="—",Font=F.bold,TextSize=16,TextColor3=T.text,AutoButtonColor=false,ZIndex=6},header)
+    local minBtn=mk("TextButton",{Size=UDim2.new(0,32,0,32),Position=UDim2.new(1,-80,0.5,-16),BackgroundColor3=T.bg3,BorderSizePixel=0,Text="—",Font=F.bold,TextSize=16,TextColor3=T.text,AutoButtonColor=false,ZIndex=6},header)
     mk("UICorner",{CornerRadius=UDim.new(0,10)},minBtn)
-    local closeBtn=mk("TextButton",{Size=UDim2.new(0,32,0,32),Position=UDim2.new(1,-40,0.5,-16),BackgroundColor3=T.bg3,BorderSizePixel=0,Text="✕",Font=F.bold,TextSize=15,TextColor3=T.text,AutoButtonColor=false,ZIndex=6},header)
+    local closeBtn=mk("TextButton",{Size=UDim2.new(0,32,0,32),Position=UDim2.new(1,-42,0.5,-16),BackgroundColor3=T.bg3,BorderSizePixel=0,Text="✕",Font=F.bold,TextSize=15,TextColor3=T.text,AutoButtonColor=false,ZIndex=6},header)
     mk("UICorner",{CornerRadius=UDim.new(0,10)},closeBtn)
-    local body=mk("Frame",{Size=UDim2.new(1,0,1,-64),Position=UDim2.new(0,0,0,64),BackgroundTransparency=1,ZIndex=2},main)
-    local sidebar=mk("Frame",{Size=UDim2.new(0,146,1,-24),Position=UDim2.new(0,12,0,12),BackgroundColor3=T.bg1,BackgroundTransparency=0.3,BorderSizePixel=0},body)
+    local body=mk("Frame",{Size=UDim2.new(1,0,1,-70),Position=UDim2.new(0,0,0,70),BackgroundTransparency=1,ZIndex=2},main)
+    local sidebar=mk("Frame",{Size=UDim2.new(0,156,1,-24),Position=UDim2.new(0,12,0,12),BackgroundColor3=T.bg1,BackgroundTransparency=0.3,BorderSizePixel=0},body)
     mk("UICorner",{CornerRadius=UDim.new(0,14)},sidebar)
     mk("UIStroke",{Color=T.border,Thickness=1,Transparency=0.5},sidebar)
     mk("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.LayoutOrder},sidebar)
     mk("UIPadding",{PaddingTop=UDim.new(0,12),PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,12)},sidebar)
-    local pageHolder=mk("Frame",{Size=UDim2.new(1,-180,1,-24),Position=UDim2.new(0,168,0,12),BackgroundColor3=T.bg1,BackgroundTransparency=0.3,BorderSizePixel=0},body)
+    mk("TextLabel",{Size=UDim2.new(1,0,0,18),BackgroundTransparency=1,Text="NAVIGATION",Font=F.bold,TextSize=9,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=0},sidebar)
+    local pageHolder=mk("Frame",{Size=UDim2.new(1,-190,1,-24),Position=UDim2.new(0,178,0,12),BackgroundColor3=T.bg1,BackgroundTransparency=0.3,BorderSizePixel=0},body)
     mk("UICorner",{CornerRadius=UDim.new(0,14)},pageHolder)
     mk("UIStroke",{Color=T.border,Thickness=1,Transparency=0.5},pageHolder)
     local pages,tabBtns={},{}
+    local tabIcons={Home="⌂",Farm="◆",Attack="⚔",Raid="◇",Misc="☷",FPS="ϟ",About="i"}
     local function makeTab(lbl,o,n)
-        local b=mk("TextButton",{Size=UDim2.new(1,0,0,34),BackgroundColor3=T.bg2,BackgroundTransparency=0.5,BorderSizePixel=0,Text="",AutoButtonColor=false,LayoutOrder=o},sidebar)
-        mk("UICorner",{CornerRadius=UDim.new(0,9)},b)
-        local ind=mk("Frame",{Size=UDim2.new(0,3,0,16),Position=UDim2.new(0,6,0.5,-8),BackgroundColor3=T.accent,BorderSizePixel=0,Visible=false},b)
+        local b=mk("TextButton",{Size=UDim2.new(1,0,0,37),BackgroundColor3=T.bg2,BackgroundTransparency=0.62,BorderSizePixel=0,Text="",AutoButtonColor=false,LayoutOrder=o},sidebar)
+        mk("UICorner",{CornerRadius=UDim.new(0,10)},b)
+        local ind=mk("Frame",{Size=UDim2.new(0,3,0,20),Position=UDim2.new(0,4,0.5,-10),BackgroundColor3=T.accent,BorderSizePixel=0,Visible=false},b)
         mk("UICorner",{CornerRadius=UDim.new(1,0)},ind)
-        local dot=mk("Frame",{Size=UDim2.new(0,6,0,6),Position=UDim2.new(0,18,0.5,-3),BackgroundColor3=T.textFaint,BorderSizePixel=0},b)
+        local dot=mk("Frame",{Size=UDim2.new(0,7,0,7),Position=UDim2.new(0,16,0.5,-3.5),BackgroundColor3=T.textFaint,BorderSizePixel=0},b)
         mk("UICorner",{CornerRadius=UDim.new(1,0)},dot)
-        local t=mk("TextLabel",{Size=UDim2.new(1,-40,1,0),Position=UDim2.new(0,30,0,0),BackgroundTransparency=1,Text=lbl,Font=F.med,TextSize=12,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Left},b)
-        tabBtns[n]={btn=b,ind=ind,dot=dot,lbl=t}
+        local icon=mk("TextLabel",{Size=UDim2.new(0,18,1,0),Position=UDim2.new(0,29,0,0),BackgroundTransparency=1,Text=tabIcons[n] or "•",Font=F.bold,TextSize=12,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Center},b)
+        local t=mk("TextLabel",{Size=UDim2.new(1,-55,1,0),Position=UDim2.new(0,51,0,0),BackgroundTransparency=1,Text=lbl,Font=F.med,TextSize=12,TextColor3=T.textDim,TextXAlignment=Enum.TextXAlignment.Left},b)
+        tabBtns[n]={btn=b,ind=ind,dot=dot,lbl=t,icon=icon}
+        b.MouseEnter:Connect(function()
+            if not b:GetAttribute("BDZActive") then tw(b,0.15,{BackgroundColor3=T.bg3,BackgroundTransparency=0.25}) end
+        end)
+        b.MouseLeave:Connect(function()
+            if not b:GetAttribute("BDZActive") then tw(b,0.15,{BackgroundColor3=T.bg2,BackgroundTransparency=0.62}) end
+        end)
     end
     local function newPage(n)
         local p=mk("Frame",{Name=n,Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Visible=false},pageHolder)
@@ -922,9 +976,10 @@ do
     local scAbout=newPage("About")
     makeTab("Home",1,"Home") makeTab("Farm",2,"Farm") makeTab("Attack",3,"Attack")
     makeTab("Raid",4,"Raid") makeTab("Misc",5,"Misc") makeTab("FPS",6,"FPS") makeTab("About",7,"About")
+    local sideFooter=mk("TextLabel",{Size=UDim2.new(1,-16,0,26),Position=UDim2.new(0,8,1,-38),BackgroundTransparency=1,Text="BDZ HUB  •  BLOX FRUITS",Font=F.mono,TextSize=8,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Center,ZIndex=3},sidebar)
     local function sec(par,txt,o)
         local w=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundTransparency=1,LayoutOrder=o},par)
-        mk("TextLabel",{Size=UDim2.new(1,0,0,16),BackgroundTransparency=1,Text=txt,Font=F.bold,TextSize=10,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left},w)
+        mk("TextLabel",{Size=UDim2.new(1,0,0,16),BackgroundTransparency=1,Text=txt,Font=F.bold,TextSize=9,TextColor3=T.textFaint,TextXAlignment=Enum.TextXAlignment.Left},w)
         mk("Frame",{Size=UDim2.new(0,22,0,2),Position=UDim2.new(0,0,0,20),BackgroundColor3=T.accent,BorderSizePixel=0},w)
         return w
     end
@@ -1245,13 +1300,26 @@ do
         for nn,p in pairs(pages) do p.root.Visible=(nn==n) end
         for nn,d in pairs(tabBtns) do
             local on=nn==n
+            d.btn:SetAttribute("BDZActive",on)
             d.ind.Visible=on
-            tw(d.btn,0.2,{BackgroundColor3=on and T.bg3 or T.bg2,BackgroundTransparency=on and 0 or 0.5})
+            tw(d.btn,0.2,{BackgroundColor3=on and T.bg3 or T.bg2,BackgroundTransparency=on and 0.08 or 0.62})
             tw(d.dot,0.2,{BackgroundColor3=on and T.accentHot or T.textFaint})
+            tw(d.icon,0.2,{TextColor3=on and T.accentHot or T.textFaint})
             tw(d.lbl,0.2,{TextColor3=on and T.text or T.textDim})
         end
     end
     for n,d in pairs(tabBtns) do d.btn.MouseButton1Click:Connect(function() setTab(n) end) end
+    task.spawn(function()
+        for _=1,40 do
+            if LogoAsset then
+                headerLogo.Image=LogoAsset
+                headerLogo.ImageTransparency=0
+                headerGlyph.Visible=false
+                break
+            end
+            task.wait(0.15)
+        end
+    end)
     setTab("Home")
 
     UI.Upd=function()
