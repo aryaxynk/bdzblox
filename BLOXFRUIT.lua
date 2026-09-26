@@ -259,6 +259,9 @@ end
 task.spawn(function() LogoAsset=LoadRemoteLogo() end)
 
 local loadingDone=false
+local AUTHENTICATED=false
+local SUPABASE_URL="https://nklukqriopezsoalnghm.supabase.co/functions/v1/check-key"
+local SUPABASE_APIKEY=getgenv().BDZ_SUPABASE_APIKEY or ""
 do
     local lg=Instance.new("ScreenGui")
     lg.Name="BdzHubLoading"; lg.ResetOnSpawn=false; lg.IgnoreGuiInset=true
@@ -1630,6 +1633,7 @@ do
     closeBtn.MouseLeave:Connect(function() tw(closeBtn,0.15,{BackgroundColor3=T.bg3}) end)
 
     main.Size=UDim2.new(0,W,0,0) main.BackgroundTransparency=1 main.Visible=false
+-- AUTH GATE ENABLED
     task.spawn(function()
         while not loadingDone or not passed do task.wait(0.05) end
         task.wait(0.15)
